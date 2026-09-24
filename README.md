@@ -8,6 +8,7 @@ A fast, lightweight image editor that runs entirely in your browser. No installa
 
 - **Formats** — opens and saves WebP, PNG, and JPEG
 - **Layers** — add any image as a layer; per-layer visibility, opacity, and nine blend modes (multiply, screen, overlay, soft light, …); rename, duplicate, reorder, merge down, and delete; drag on canvas or use arrow keys to position
+- **Background removal** — automatic background detection: samples the layer edges, flood-fills the connected background with a live magenta preview, adjustable tolerance and edge softening; magic wand (contiguous or global); soft eraser brush; restore brush that paints the original pixels back. Exports keep transparency (WebP/PNG); JPEG flattens onto white
 - **Presets** — one-click looks: Original, Vivid, Warm, Cool, Noir, Sepia, Vintage, Faded, Punch, Chrome, Matte, Cinema
 - **Adjustments** — brightness, contrast, saturation, temperature, tint, hue, blur, grayscale, sepia, invert
 - **Effects** — sharpen (convolution), vignette, film grain, pixelate
@@ -32,7 +33,9 @@ Open `index.html` in any modern browser (Chrome, Edge, or Firefox 96+ recommende
 | `Ctrl+Y` | Redo |
 | `Ctrl+S` | Export / download |
 | `C` (hold) | View unedited composite |
-| `Esc` | Cancel crop |
+| `W` / `E` / `R` | Magic wand / eraser / restore tool |
+| `[` / `]` | Decrease / increase brush size |
+| `Esc` | Cancel crop or background preview |
 | Arrow keys / `Shift`+arrows | Move active layer by 1 px / 10 px |
 | `Delete` | Remove active layer |
 | Drag on canvas | Move active layer |

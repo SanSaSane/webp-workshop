@@ -81,6 +81,7 @@
   }
   #preview{display:block;}
   #cropOverlay{position:absolute; inset:0; display:none; cursor:crosshair;}
+  #bgOverlay{position:absolute; inset:0; pointer-events:none;}
   #statusbar{
     display:flex; gap:14px; align-items:center; color:var(--dim); font-size:11.5px;
     font-variant-numeric:tabular-nums; white-space:nowrap;
@@ -112,6 +113,7 @@
   .btnrow{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:7px;}
   .btnrow:last-child{margin-bottom:0;}
   .btnrow button{flex:1; padding:4px 2px; font-size:12px;}
+  .btnrow button.on{border-color:var(--accent); color:var(--text); background:#28313d;}
   #presetGrid{display:grid; grid-template-columns:repeat(3,1fr); gap:5px;}
   #presetGrid button{padding:4px 2px; font-size:11.5px; color:var(--dim);}
   #presetGrid button:hover{color:var(--text);}
@@ -152,7 +154,7 @@
 <body>
 
 <header>
-  <div class="brand">WebP Workshop <span>v1.2</span></div>
+  <div class="brand">WebP Workshop <span>v1.3</span></div>
   <div class="tb-actions">
     <button id="btnOpen">Open&hellip;</button>
     <div class="tb-sep"></div>
@@ -181,6 +183,7 @@
     <div id="stage" hidden>
       <div id="canvasWrap">
         <canvas id="preview"></canvas>
+        <canvas id="bgOverlay"></canvas>
         <canvas id="cropOverlay"></canvas>
       </div>
       <div id="statusbar">
@@ -272,6 +275,30 @@
     </section>
 
     <section>
+      <h3>Background</h3>
+      <div class="btnrow"><button id="bgAuto" style="flex:2" title="Detect a uniform background from the image edges and preview the removal">Auto detect &amp; remove</button></div>
+      <div class="croptools" id="bgTools">
+        <div class="btnrow">
+          <button id="bgApply" class="primary" style="flex:2">Apply</button>
+          <button id="bgCancel">Cancel</button>
+        </div>
+      </div>
+      <div class="ctl"><div class="row"><label>Tolerance</label><span class="val" id="v_bgTol"></span></div>
+        <input type="range" id="s_bgTol" min="1" max="100" value="22"></div>
+      <div class="ctl"><div class="row"><label>Edge softening</label><span class="val" id="v_bgSoft"></span></div>
+        <input type="range" id="s_bgSoft" min="0" max="6" value="1"></div>
+      <div class="btnrow">
+        <button id="toolWand" title="Magic wand: click to remove a similar-colored area (W)">Wand</button>
+        <button id="toolErase" title="Eraser brush (E)">Eraser</button>
+        <button id="toolRestore" title="Restore brush: paint the original image back (R)">Restore</button>
+      </div>
+      <div class="ctl"><div class="row"><label>Brush size</label><span class="val" id="v_brush"></span></div>
+        <input type="range" id="s_brush" min="4" max="200" value="28"></div>
+      <label style="display:flex; gap:6px; align-items:center"><input type="checkbox" id="wandContig" checked> Contiguous (wand)</label>
+      <div class="hint">Tools edit the active layer. Auto detect samples the layer edges &mdash; adjust tolerance, then apply. Hold C to check the result.</div>
+    </section>
+
+    <section>
       <h3>Transform</h3>
       <div class="btnrow">
         <button id="rotL" class="icon" title="Rotate 90&deg; left">
@@ -341,6 +368,7 @@
       </div>
       <input type="range" id="exQuality" min="1" max="100" value="90">
       <div id="estLine"></div>
+      <div class="hint">JPEG flattens transparency onto white.</div>
       <button id="exDownload" class="primary" style="width:100%; margin-top:8px">Download</button>
     </section>
   </aside>
@@ -356,6 +384,7 @@ const els = {
   viewport:$("viewport"), stage:$("stage"), dz:$("dropzone"),
   preview:$("preview"), overlay:$("cropOverlay"),
   layerList:$("layerList"), lyBlend:$("lyBlend"), lyOpacity:$("lyOpacity"),
+  bgOverlay:$("bgOverlay"), bgTools:$("bgTools"),
   file:$("fileInput"),
   undo:$("btnUndo"), redo:$("btnRedo"), reset:$("btnReset"),
   compare:$("btnCompare"), exportBtn:$("btnExport"),
@@ -379,6 +408,8 @@ const S = {
   zoom:"fit",
   cropMode:false, cropRect:null, cropAspect:null,
   comparing:false,
+  tool:null,              // null | "wand" | "erase" | "restore"
+  bgMode:false, bgMaskSmall:null, ring:null,
 };
 const DEF_ADJUST = {...S.adjust}, DEF_FX = {...S.fx};
 const PREVIEW_CAP = 1600;
@@ -424,13 +455,14 @@ function composite(){
 
 /* ---------- history ---------- */
 function layerCopies(){
-  return S.layers.map(L => ({name:L.name, canvas:cloneCanvas(L.canvas), x:L.x, y:L.y,
-    opacity:L.opacity, blend:L.blend, visible:L.visible}));
+  return S.layers.map(L => ({name:L.name, canvas:cloneCanvas(L.canvas), orig:L.orig?cloneCanvas(L.orig):null,
+    x:L.x, y:L.y, opacity:L.opacity, blend:L.blend, visible:L.visible, rev:L.rev||0}));
 }
 function layerMeta(){
   return JSON.stringify(S.layers.map(L =>
-    [L.name,L.x,L.y,L.opacity,L.blend,L.visible,L.canvas.width,L.canvas.height])) + S.canvasW + "x" + S.canvasH;
+    [L.name,L.x,L.y,L.opacity,L.blend,L.visible,L.canvas.width,L.canvas.height,L.rev||0])) + S.canvasW + "x" + S.canvasH;
 }
+function pixelEdit(L){ L.rev = (L.rev||0) + 1; compDirty = true; }
 function pushHistory(){
   S.history.length = S.hIdx + 1;
   S.history.push({layers:layerCopies(), meta:layerMeta(), canvasW:S.canvasW, canvasH:S.canvasH,
@@ -441,11 +473,13 @@ function pushHistory(){
 }
 function restore(i){
   const h = S.history[i];
-  S.layers = h.layers.map(L => ({...L, canvas:cloneCanvas(L.canvas)}));
+  S.layers = h.layers.map(L => ({...L, canvas:cloneCanvas(L.canvas), orig:L.orig?cloneCanvas(L.orig):null}));
   S.canvasW = h.canvasW; S.canvasH = h.canvasH;
   S.active = Math.min(h.active, S.layers.length - 1);
   S.adjust = {...h.adjust}; S.fx = {...h.fx};
   S.hIdx = i; S.cropMode = false; S.cropRect = null; S.zoom = "fit";
+  S.tool = null; S.bgMode = false; S.bgMaskSmall = null; S.ring = null;
+  syncToolUI(); syncBgUI();
   compDirty = true;
   syncSliderUI(); syncResizeInputs(); syncCropUI(); syncLayerControls(); markPreset();
   updateHistUI(); renderLayerList(); renderPreview();
@@ -472,6 +506,7 @@ function commitIfChanged(){
 function afterEdit(){
   compDirty = true;
   if (S.active >= S.layers.length) S.active = S.layers.length - 1;
+  if (S.bgMode) exitBgPreview();
   pushHistory();
   renderLayerList(); syncLayerControls();
   renderPreview();
@@ -608,15 +643,21 @@ function fitView(){
   els.stZoom.textContent = Math.round(z * 100) + "%";
   syncOverlaySize();
   drawCropOverlay();
+  drawBgOverlay();
 }
 function syncOverlaySize(){
   els.overlay.style.width = els.preview.style.width;
   els.overlay.style.height = els.preview.style.height;
+  els.bgOverlay.style.width = els.preview.style.width;
+  els.bgOverlay.style.height = els.preview.style.height;
   const dpr = window.devicePixelRatio || 1;
   const cw = parseFloat(els.preview.style.width) || els.preview.width;
   const ch = parseFloat(els.preview.style.height) || els.preview.height;
   els.overlay.width = Math.round(cw * dpr);
   els.overlay.height = Math.round(ch * dpr);
+  els.bgOverlay.width = Math.round(cw * dpr);
+  els.bgOverlay.height = Math.round(ch * dpr);
+  drawBgOverlay();
 }
 window.addEventListener("resize", fitView);
 
@@ -645,11 +686,13 @@ function loadAsDocument(img, file){
   const c = document.createElement("canvas");
   c.width = img.naturalWidth; c.height = img.naturalHeight;
   c.getContext("2d").drawImage(img, 0, 0);
-  S.layers = [{name:baseName(file.name), canvas:c, x:0, y:0, opacity:100, blend:"normal", visible:true}];
+  S.layers = [{name:baseName(file.name), canvas:c, orig:cloneCanvas(c), x:0, y:0, opacity:100, blend:"normal", visible:true, rev:0}];
   S.active = 0;
   S.canvasW = c.width; S.canvasH = c.height;
   S.fileName = file.name; S.fileSize = file.size;
   S.zoom = "fit"; S.cropMode = false; S.cropRect = null;
+  S.tool = null; S.bgMode = false; S.bgMaskSmall = null; S.ring = null;
+  syncToolUI(); syncBgUI();
   compDirty = true;
 
   S.history = []; S.hIdx = -1;
@@ -835,7 +878,11 @@ function renderLayerList(){
     });
     row.appendChild(eye); row.appendChild(nm);
     row.addEventListener("click", () => {
-      if (S.active !== i){ S.active = i; renderLayerList(); syncLayerControls(); }
+      if (S.active !== i){
+        S.active = i;
+        if (S.bgMode) exitBgPreview();
+        renderLayerList(); syncLayerControls();
+      }
     });
     list.appendChild(row);
   }
@@ -892,15 +939,15 @@ function addLayerFromImage(img, name){
   ctx.drawImage(img, 0, 0, w, h);
   const n = S.layers.filter(L => /^Layer \d+$/.test(L.name)).length + 1;
   S.layers.push({name:name.match(/^Layer \d+$/) ? "Layer " + n : name,
-    canvas:c, x:Math.round((S.canvasW - w)/2), y:Math.round((S.canvasH - h)/2),
-    opacity:100, blend:"normal", visible:true});
+    canvas:c, orig:cloneCanvas(c), x:Math.round((S.canvasW - w)/2), y:Math.round((S.canvasH - h)/2),
+    opacity:100, blend:"normal", visible:true, rev:0});
   S.active = S.layers.length - 1;
   afterEdit();
 }
 $("lyAdd").addEventListener("click", () => { pickMode = "layer"; els.file.click(); });
 $("lyDup").addEventListener("click", () => {
   const L = S.layers[S.active]; if (!L) return;
-  const copy = {...L, name:L.name + " copy", canvas:cloneCanvas(L.canvas), x:L.x + 12, y:L.y + 12};
+  const copy = {...L, name:L.name + " copy", canvas:cloneCanvas(L.canvas), orig:L.orig?cloneCanvas(L.orig):null, x:L.x + 12, y:L.y + 12};
   S.layers.splice(S.active + 1, 0, copy);
   S.active = S.active + 1;
   afterEdit();
@@ -921,80 +968,380 @@ function moveLayer(dir){
   S.active = j;
   afterEdit();
 }
-$("lyMerge").addEventListener("click", () => {
-  const i = S.active;
-  if (i <= 0){ toast("No layer below to merge into"); return; }
-  const A = S.layers[i], B = S.layers[i - 1];
+function mergePair(A, B, key){
   const x = Math.min(A.x, B.x), y = Math.min(A.y, B.y);
-  const x2 = Math.max(A.x + A.canvas.width, B.x + B.canvas.width);
-  const y2 = Math.max(A.y + A.canvas.height, B.y + B.canvas.height);
+  const x2 = Math.max(A.x + A[key].width, B.x + B[key].width);
+  const y2 = Math.max(A.y + A[key].height, B.y + B[key].height);
   const c = document.createElement("canvas");
   c.width = x2 - x; c.height = y2 - y;
   const ctx = c.getContext("2d");
   ctx.globalAlpha = B.opacity / 100;
   ctx.globalCompositeOperation = B.blend === "normal" ? "source-over" : B.blend;
-  ctx.drawImage(B.canvas, B.x - x, B.y - y);
+  ctx.drawImage(B[key], B.x - x, B.y - y);
   ctx.globalAlpha = A.opacity / 100;
   ctx.globalCompositeOperation = A.blend === "normal" ? "source-over" : A.blend;
-  ctx.drawImage(A.canvas, A.x - x, A.y - y);
+  ctx.drawImage(A[key], A.x - x, A.y - y);
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
-  S.layers[i - 1] = {name:B.name, canvas:c, x, y, opacity:100, blend:"normal", visible:true};
+  return {canvas:c, x, y};
+}
+$("lyMerge").addEventListener("click", () => {
+  const i = S.active;
+  if (i <= 0){ toast("No layer below to merge into"); return; }
+  const A = S.layers[i], B = S.layers[i - 1];
+  const mc = mergePair(A, B, "canvas");
+  const mo = mergePair({x:A.x, y:A.y, opacity:A.opacity, blend:A.blend, orig:A.orig||A.canvas},
+                       {x:B.x, y:B.y, opacity:B.opacity, blend:B.blend, orig:B.orig||B.canvas}, "orig");
+  S.layers[i - 1] = {name:B.name, canvas:mc.canvas, orig:mo.canvas, x:mc.x, y:mc.y, opacity:100, blend:"normal", visible:true, rev:(A.rev||0)+(B.rev||0)+1};
   S.layers.splice(i, 1);
   S.active = i - 1;
   afterEdit();
 });
 
-/* drag active layer on canvas */
+/* drag active layer / brush tools on canvas */
 let dragL = null;
+function toCanvasPt(e){
+  const rect = els.preview.getBoundingClientRect();
+  const z = parseFloat(els.preview.style.width) / els.preview.width;   // css px per preview px
+  const k = 1 / (z * S.prevScale || 1);                                // canvas px per css px
+  return { x:(e.clientX - rect.left) * k, y:(e.clientY - rect.top) * k };
+}
 els.preview.addEventListener("pointerdown", e => {
   if (S.cropMode || !S.layers.length) return;
   els.preview.setPointerCapture(e.pointerId);
-  const L = S.layers[S.active];
-  dragL = {cx:e.clientX, cy:e.clientY, lx:L.x, ly:L.y};
+  const pt = toCanvasPt(e);
+  if (S.tool === "erase" || S.tool === "restore"){
+    S._stroke = {last:pt};
+    stampAt(pt);
+    compDirty = true; requestRender();
+  } else if (S.tool === "wand"){
+    wandAt(pt);
+  } else {
+    const L = S.layers[S.active];
+    dragL = {sx:pt.x, sy:pt.y, lx:L.x, ly:L.y};
+  }
 });
 els.preview.addEventListener("pointermove", e => {
+  if (!S.layers.length) return;
+  const pt = toCanvasPt(e);
+  if (S.tool){
+    if (S.tool !== "wand"){ S.ring = pt; drawBgOverlay(); }
+    if (S._stroke && pt) strokeTo(pt);
+    return;
+  }
   if (!dragL) return;
-  const z = parseFloat(els.preview.style.width) / els.preview.width;   // css px per preview px
-  const k = 1 / (z * S.prevScale || 1);                                // canvas px per css px
   const L = S.layers[S.active];
-  L.x = Math.round(dragL.lx + (e.clientX - dragL.cx) * k);
-  L.y = Math.round(dragL.ly + (e.clientY - dragL.cy) * k);
+  L.x = Math.round(dragL.lx + (pt.x - dragL.sx));
+  L.y = Math.round(dragL.ly + (pt.y - dragL.sy));
   compDirty = true;
   requestRender();
 });
+function strokeTo(pt){
+  const st = S._stroke;
+  const dx = pt.x - st.last.x, dy = pt.y - st.last.y;
+  const dist = Math.hypot(dx, dy);
+  const b = brushPx();
+  const steps = Math.max(1, Math.ceil(dist / Math.max(1, b * 0.2)));
+  for (let i = 1; i <= steps; i++) stampAt({x:st.last.x + dx*i/steps, y:st.last.y + dy*i/steps});
+  st.last = pt;
+  compDirty = true;
+  requestRender();
+}
 els.preview.addEventListener("pointerup", () => {
+  if (S._stroke){ S._stroke = null; commitIfChanged(); updateEstimate(); return; }
   if (dragL){ dragL = null; commitIfChanged(); updateEstimate(); }
 });
-els.preview.addEventListener("pointercancel", () => { dragL = null; });
+els.preview.addEventListener("pointercancel", () => { S._stroke = null; dragL = null; });
+els.preview.addEventListener("pointerleave", () => { if (S.ring){ S.ring = null; drawBgOverlay(); } });
+function brushPx(){ return parseInt($("s_brush").value); }
+function stampAt(pt){
+  const L = S.layers[S.active]; if (!L) return;
+  const b = brushPx(), r = b/2;
+  const lx = pt.x - L.x, ly = pt.y - L.y;
+  const ctx = L.canvas.getContext("2d");
+  if (S.tool === "erase"){
+    const g = ctx.createRadialGradient(lx, ly, r*0.5, lx, ly, r);
+    g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save(); ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(lx, ly, r, 0, 6.2832); ctx.fill(); ctx.restore();
+  } else {
+    if (!L.orig) return;
+    const t = document.createElement("canvas"); t.width = b; t.height = b;
+    const tc = t.getContext("2d");
+    tc.drawImage(L.orig, lx - r, ly - r, b, b, 0, 0, b, b);
+    tc.globalCompositeOperation = "destination-in";
+    const g = tc.createRadialGradient(r, r, r*0.5, r, r, r);
+    g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    tc.fillStyle = g; tc.fillRect(0, 0, b, b);
+    ctx.drawImage(t, lx - r, ly - r);
+  }
+}
+function wandAt(pt){
+  const L = S.layers[S.active]; if (!L) return;
+  const w = L.canvas.width, h = L.canvas.height;
+  const lx = Math.floor(pt.x - L.x), ly = Math.floor(pt.y - L.y);
+  if (lx < 0 || ly < 0 || lx >= w || ly >= h){ toast("Click inside the active layer"); return; }
+  const data = L.canvas.getContext("2d").getImageData(0, 0, w, h).data;
+  const si = ly*w + lx, i4 = si*4;
+  const ref = [data[i4], data[i4+1], data[i4+2]];
+  let mask = $("wandContig").checked
+    ? floodGlobal(w, h, data, [si], ref, tolPx())
+    : maskAllMatching(w, h, data, ref, tolPx());
+  mask = blurMask(mask, w, h, softPx());
+  eraseWithMask(L, mask);
+  pixelEdit(L);
+  compDirty = true; requestRender(); commitIfChanged(); updateEstimate();
+}
+
+/* ---------- background removal ---------- */
+function tolPx(){ return parseInt($("s_bgTol").value) * 1.8; }
+function softPx(){ return parseInt($("s_bgSoft").value); }
+function floodGlobal(w, h, data, seeds, ref, tol){
+  const t2 = tol*tol;
+  const mask = new Uint8Array(w*h), seen = new Uint8Array(w*h);
+  const stack = new Int32Array(w*h); let sp = 0;
+  const tryPush = idx => {
+    if (seen[idx]) return;
+    seen[idx] = 1;
+    const i = idx*4;
+    if (data[i+3] < 12){ mask[idx] = 255; stack[sp++] = idx; return; }
+    const dr = data[i]-ref[0], dg = data[i+1]-ref[1], db = data[i+2]-ref[2];
+    if (dr*dr + dg*dg + db*db <= t2){ mask[idx] = 255; stack[sp++] = idx; }
+  };
+  for (const s of seeds) tryPush(s);
+  while (sp > 0){
+    const idx = stack[--sp];
+    const x = idx % w, y = (idx - x) / w;
+    if (x > 0) tryPush(idx - 1);
+    if (x < w-1) tryPush(idx + 1);
+    if (y > 0) tryPush(idx - w);
+    if (y < h-1) tryPush(idx + w);
+  }
+  return mask;
+}
+function maskAllMatching(w, h, data, ref, tol){
+  const t2 = tol*tol;
+  const mask = new Uint8Array(w*h);
+  for (let idx = 0; idx < w*h; idx++){
+    const i = idx*4;
+    if (data[i+3] < 12){ mask[idx] = 255; continue; }
+    const dr = data[i]-ref[0], dg = data[i+1]-ref[1], db = data[i+2]-ref[2];
+    if (dr*dr + dg*dg + db*db <= t2) mask[idx] = 255;
+  }
+  return mask;
+}
+function blurMask(mask, w, h, r){
+  if (r <= 0) return mask;
+  const win = 2*r + 1;
+  const tmp = new Float32Array(w*h), out = new Uint8Array(w*h);
+  for (let y = 0; y < h; y++){
+    let sum = 0; const row = y*w;
+    for (let x = -r; x <= r; x++) sum += mask[row + clamp(x, 0, w-1)];
+    for (let x = 0; x < w; x++){
+      tmp[row + x] = sum / win;
+      sum += mask[row + clamp(x + r + 1, 0, w-1)] - mask[row + clamp(x - r, 0, w-1)];
+    }
+  }
+  for (let x = 0; x < w; x++){
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[clamp(y, 0, h-1)*w + x];
+    for (let y = 0; y < h; y++){
+      out[y*w + x] = Math.round(sum / win);
+      sum += tmp[clamp(y + r + 1, 0, h-1)*w + x] - tmp[clamp(y - r, 0, h-1)*w + x];
+    }
+  }
+  return out;
+}
+function estimateBgRef(data, w, h){
+  let r = 0, g = 0, b = 0, n = 0;
+  const px = (x, y) => {
+    const i = (y*w + x)*4;
+    if (data[i+3] >= 24){ r += data[i]; g += data[i+1]; b += data[i+2]; n++; }
+  };
+  for (let x = 0; x < w; x++){ px(x, 0); px(x, h-1); }
+  for (let y = 0; y < h; y++){ px(0, y); px(w-1, y); }
+  return n ? [r/n, g/n, b/n] : [255, 255, 255];
+}
+function autoMaskFrom(data, w, h){
+  const ref = estimateBgRef(data, w, h);
+  const seeds = [];
+  for (let x = 0; x < w; x++){ seeds.push(x, (h-1)*w + x); }
+  for (let y = 1; y < h-1; y++){ seeds.push(y*w, y*w + w - 1); }
+  const mask = floodGlobal(w, h, data, seeds, ref, tolPx());
+  for (let i = 0; i < w*h; i++) if (data[i*4+3] < 12) mask[i] = 255;
+  return mask;
+}
+function eraseWithMask(L, mask){
+  const w = L.canvas.width, h = L.canvas.height;
+  const t = document.createElement("canvas"); t.width = w; t.height = h;
+  const img = t.getContext("2d").createImageData(w, h);
+  for (let i = 0; i < mask.length; i++) img.data[i*4+3] = mask[i];
+  t.getContext("2d").putImageData(img, 0, 0);
+  const ctx = L.canvas.getContext("2d");
+  ctx.save(); ctx.globalCompositeOperation = "destination-out";
+  ctx.drawImage(t, 0, 0); ctx.restore();
+}
+function bgPreviewCompute(){
+  const L = S.layers[S.active]; if (!L) return;
+  const k = Math.min(1, 900 / Math.max(L.canvas.width, L.canvas.height));
+  const w = Math.max(1, Math.round(L.canvas.width * k)), h = Math.max(1, Math.round(L.canvas.height * k));
+  const t = document.createElement("canvas"); t.width = w; t.height = h;
+  t.getContext("2d").drawImage(L.canvas, 0, 0, w, h);
+  const data = t.getContext("2d").getImageData(0, 0, w, h).data;
+  const mask = autoMaskFrom(data, w, h);
+  const m = document.createElement("canvas"); m.width = w; m.height = h;
+  const mi = m.getContext("2d").createImageData(w, h);
+  for (let i = 0; i < w*h; i++) mi.data[i*4+3] = mask[i];
+  m.getContext("2d").putImageData(mi, 0, 0);
+  S.bgMaskSmall = m;
+}
+function exitBgPreview(){ S.bgMode = false; S.bgMaskSmall = null; syncBgUI(); }
+function syncBgUI(){
+  els.bgTools.classList.toggle("on", S.bgMode);
+  $("bgAuto").classList.toggle("on", S.bgMode);
+  drawBgOverlay();
+}
+function drawBgOverlay(){
+  const c = els.bgOverlay;
+  if (!c.width || !S.layers.length) return;
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (S.bgMode && S.bgMaskSmall){
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(S.bgMaskSmall, 0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = "source-in";
+    ctx.fillStyle = "rgba(255,0,255,.55)";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  if (S.ring && (S.tool === "erase" || S.tool === "restore")){
+    const f = c.width / Math.max(1, S.canvasW);
+    const b = brushPx();
+    ctx.beginPath();
+    ctx.arc(S.ring.x * f, S.ring.y * f, Math.max(2, b/2 * f), 0, 6.2832);
+    ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 3; ctx.stroke();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+function clearTool(){ S.tool = null; syncToolUI(); }
+function setTool(t){
+  S.tool = S.tool === t ? null : t;
+  if (S.tool){
+    if (S.bgMode) exitBgPreview();
+    if (S.cropMode){ S.cropMode = false; S.cropRect = null; syncCropUI(); }
+  }
+  syncToolUI();
+}
+function syncToolUI(){
+  $("toolWand").classList.toggle("on", S.tool === "wand");
+  $("toolErase").classList.toggle("on", S.tool === "erase");
+  $("toolRestore").classList.toggle("on", S.tool === "restore");
+  els.preview.style.cursor = S.tool ? "crosshair" : "";
+  if (!S.tool){ S.ring = null; drawBgOverlay(); }
+}
+$("bgAuto").addEventListener("click", () => {
+  if (!S.layers.length) return;
+  if (S.bgMode){ exitBgPreview(); return; }
+  clearTool();
+  if (S.cropMode){ S.cropMode = false; S.cropRect = null; syncCropUI(); }
+  S.bgMode = true;
+  bgPreviewCompute();
+  syncBgUI();
+});
+let bgTimer = null;
+$("s_bgTol").addEventListener("input", () => {
+  $("v_bgTol").textContent = $("s_bgTol").value;
+  if (S.bgMode){
+    clearTimeout(bgTimer);
+    bgTimer = setTimeout(() => { bgPreviewCompute(); drawBgOverlay(); }, 80);
+  }
+});
+$("s_bgSoft").addEventListener("input", () => {
+  $("v_bgSoft").textContent = $("s_bgSoft").value + " px";
+});
+$("s_brush").addEventListener("input", () => {
+  $("v_brush").textContent = brushPx() + " px";
+  if (S.ring) drawBgOverlay();
+});
+function setBrush(v){
+  v = clamp(v, 4, 200);
+  $("s_brush").value = v;
+  $("v_brush").textContent = v + " px";
+  if (S.ring) drawBgOverlay();
+}
+$("bgApply").addEventListener("click", () => {
+  const L = S.layers[S.active]; if (!L) return;
+  const w = L.canvas.width, h = L.canvas.height;
+  const data = L.canvas.getContext("2d").getImageData(0, 0, w, h).data;
+  let mask = autoMaskFrom(data, w, h);
+  mask = blurMask(mask, w, h, softPx());
+  eraseWithMask(L, mask);
+  pixelEdit(L);
+  afterEdit();
+  toast("Background removed");
+});
+$("bgCancel").addEventListener("click", exitBgPreview);
+$("toolWand").addEventListener("click", () => setTool("wand"));
+$("toolErase").addEventListener("click", () => setTool("erase"));
+$("toolRestore").addEventListener("click", () => setTool("restore"));
 
 /* ---------- transform (applies to every layer) ---------- */
+function rotCanvas(src, dir){
+  const c = document.createElement("canvas");
+  c.width = src.height; c.height = src.width;
+  const ctx = c.getContext("2d");
+  ctx.save();
+  ctx.translate(c.width/2, c.height/2);
+  ctx.rotate(dir * Math.PI/2);
+  ctx.drawImage(src, -src.width/2, -src.height/2);
+  ctx.restore();
+  return c;
+}
+function flipCanvas(src, horiz){
+  const c = document.createElement("canvas");
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext("2d");
+  ctx.save();
+  ctx.translate(horiz ? src.width : 0, horiz ? 0 : src.height);
+  ctx.scale(horiz ? -1 : 1, horiz ? 1 : -1);
+  ctx.drawImage(src, 0, 0);
+  ctx.restore();
+  return c;
+}
+function scaleCanvas(src, w, h){
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, w, h);
+  return c;
+}
+function cropCanvasAt(src, ox, oy, x1, y1, x2, y2){
+  const c = document.createElement("canvas");
+  c.width = x2 - x1; c.height = y2 - y1;
+  c.getContext("2d").drawImage(src, x1 - ox, y1 - oy, x2 - x1, y2 - y1, 0, 0, x2 - x1, y2 - y1);
+  return c;
+}
 function opRotate(dir){ // dir 1 = clockwise
   const W = S.canvasW, H = S.canvasH;
   for (const L of S.layers){
-    const c = document.createElement("canvas");
-    c.width = L.canvas.height; c.height = L.canvas.width;
-    const ctx = c.getContext("2d");
-    ctx.translate(c.width/2, c.height/2);
-    ctx.rotate(dir * Math.PI/2);
-    ctx.drawImage(L.canvas, -L.canvas.width/2, -L.canvas.height/2);
-    const nx = dir === 1 ? H - L.y - L.canvas.height : L.y;
-    const ny = dir === 1 ? L.x : W - L.x - L.canvas.width;
-    L.canvas = c; L.x = nx; L.y = ny;
+    const lw = L.canvas.width, lh = L.canvas.height;
+    const ox = L.x, oy = L.y;
+    const oc = L.canvas, oo = L.orig || L.canvas;
+    L.canvas = rotCanvas(oc, dir);
+    L.orig = rotCanvas(oo, dir);
+    if (dir === 1){ L.x = H - oy - lh; L.y = ox; }
+    else { L.x = oy; L.y = W - ox - lw; }
   }
   S.canvasW = H; S.canvasH = W;
 }
 function opFlip(horiz){
   const W = S.canvasW, H = S.canvasH;
   for (const L of S.layers){
-    const c = document.createElement("canvas");
-    c.width = L.canvas.width; c.height = L.canvas.height;
-    const ctx = c.getContext("2d");
-    ctx.translate(horiz ? L.canvas.width : 0, horiz ? 0 : L.canvas.height);
-    ctx.scale(horiz ? -1 : 1, horiz ? 1 : -1);
-    ctx.drawImage(L.canvas, 0, 0);
+    L.canvas = flipCanvas(L.canvas, horiz);
+    L.orig = flipCanvas(L.orig || L.canvas, horiz);
     if (horiz) L.x = W - L.x - L.canvas.width;
     else L.y = H - L.y - L.canvas.height;
-    L.canvas = c;
   }
 }
 function opCrop(cx, cy, cw, ch){
@@ -1004,10 +1351,9 @@ function opCrop(cx, cy, cw, ch){
     const x2 = Math.min(cx + cw, L.x + L.canvas.width);
     const y2 = Math.min(cy + ch, L.y + L.canvas.height);
     if (x2 <= x1 || y2 <= y1){ S.layers.splice(i, 1); continue; }
-    const c = document.createElement("canvas");
-    c.width = x2 - x1; c.height = y2 - y1;
-    c.getContext("2d").drawImage(L.canvas, x1 - L.x, y1 - L.y, x2 - x1, y2 - y1, 0, 0, x2 - x1, y2 - y1);
-    L.canvas = c; L.x = x1 - cx; L.y = y1 - cy;
+    L.orig = cropCanvasAt(L.orig || L.canvas, L.x, L.y, x1, y1, x2, y2);
+    L.canvas = cropCanvasAt(L.canvas, L.x, L.y, x1, y1, x2, y2);
+    L.x = x1 - cx; L.y = y1 - cy;
   }
   S.canvasW = cw; S.canvasH = ch;
   S.active = clamp(S.active, 0, S.layers.length - 1);
@@ -1015,15 +1361,8 @@ function opCrop(cx, cy, cw, ch){
 function opResize(w, h){
   const sx = w / S.canvasW, sy = h / S.canvasH;
   for (const L of S.layers){
-    const nw = Math.max(1, Math.round(L.canvas.width * sx));
-    const nh = Math.max(1, Math.round(L.canvas.height * sy));
-    const c = document.createElement("canvas");
-    c.width = nw; c.height = nh;
-    const ctx = c.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(L.canvas, 0, 0, nw, nh);
-    L.canvas = c;
+    L.orig = scaleCanvas(L.orig || L.canvas, Math.max(1, Math.round((L.orig||L.canvas).width * sx)), Math.max(1, Math.round((L.orig||L.canvas).height * sy)));
+    L.canvas = scaleCanvas(L.canvas, Math.max(1, Math.round(L.canvas.width * sx)), Math.max(1, Math.round(L.canvas.height * sy)));
     L.x = Math.round(L.x * sx); L.y = Math.round(L.y * sy);
   }
   S.canvasW = w; S.canvasH = h;
@@ -1202,12 +1541,13 @@ els.viewport.addEventListener("dblclick", e => {
 });
 
 /* ---------- export ---------- */
-function buildOutput(){
+function buildOutput(fmt){
   const comp = getComp();
   const c = document.createElement("canvas");
   c.width = comp.width; c.height = comp.height;
   const ctx = c.getContext("2d");
   ctx.imageSmoothingQuality = "high";
+  if (fmt === "jpeg"){ ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); }
   if (!isNeutral()){
     ctx.filter = filterString(1);
     ctx.drawImage(comp, 0, 0);
@@ -1225,7 +1565,7 @@ function updateEstimate(){
   estTimer = setTimeout(async () => {
     const fmt = els.exFormat.value;
     const q = parseInt(els.exQuality.value) / 100;
-    const blob = await new Promise(res => buildOutput().toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
+    const blob = await new Promise(res => buildOutput(els.exFormat.value).toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
     if (!blob){ els.estLine.textContent = "Encoding not supported by this browser"; return; }
     els.estLine.textContent = `${S.canvasW}\u00d7${S.canvasH} \u00b7 ${fmtSize(blob.size)}` +
       (S.fileSize ? ` (source: ${fmtSize(S.fileSize)})` : "");
@@ -1248,7 +1588,7 @@ $("exDownload").addEventListener("click", async () => {
   const q = parseInt(els.exQuality.value) / 100;
   els.estLine.textContent = "Encoding\u2026";
   await new Promise(r => setTimeout(r, 10));
-  const blob = await new Promise(res => buildOutput().toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
+  const blob = await new Promise(res => buildOutput(fmt).toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
   if (!blob){ els.estLine.textContent = ""; toast("This browser cannot encode " + fmt.toUpperCase()); return; }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1279,8 +1619,9 @@ document.addEventListener("keydown", e => {
   } else if (mod && e.key.toLowerCase() === "o"){
     e.preventDefault();
     pickMode = "doc"; els.file.click();
-  } else if (e.key === "Escape" && S.cropMode){
-    S.cropMode = false; S.cropRect = null; syncCropUI();
+  } else if (e.key === "Escape"){
+    if (S.cropMode){ S.cropMode = false; S.cropRect = null; syncCropUI(); }
+    if (S.bgMode) exitBgPreview();
   }
 });
 /* layer keys (ignored while typing in a field) */
@@ -1296,6 +1637,11 @@ document.addEventListener("keydown", e => {
   else if (e.key === "ArrowUp"){ L.y -= step; moved = true; }
   else if (e.key === "ArrowDown"){ L.y += step; moved = true; }
   else if (e.key === "Delete"){ e.preventDefault(); removeLayer(S.active); return; }
+  else if (e.key === "w" || e.key === "W") setTool("wand");
+  else if (e.key === "e" || e.key === "E") setTool("erase");
+  else if (e.key === "r" || e.key === "R") setTool("restore");
+  else if (e.key === "[") { e.preventDefault(); setBrush(brushPx() - Math.max(2, Math.round(brushPx()*0.15))); }
+  else if (e.key === "]") { e.preventDefault(); setBrush(brushPx() + Math.max(2, Math.round(brushPx()*0.15))); }
   if (moved){
     e.preventDefault();
     compDirty = true;
@@ -1313,6 +1659,9 @@ if (!WEBP_OK){
   els.exFormat.value = "png";
 }
 syncSliderUI();
+$("v_bgTol").textContent = $("s_bgTol").value;
+$("v_bgSoft").textContent = $("s_bgSoft").value + " px";
+$("v_brush").textContent = $("s_brush").value + " px";
 renderLayerList();
 </script>
 </body>
