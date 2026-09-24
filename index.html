@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebP Workshop</title>
+<style>
+  :root{
+    --bg:#141619; --panel:#1c1f23; --panel2:#24272c; --ctl:#282c31;
+    --line:#2e3237; --line2:#3b4046;
+    --text:#d7dade; --dim:#8d939b; --faint:#5f656d;
+    --accent:#5b8ec9; --accent-h:#6d9dd6;
+    --danger:#c96a6a;
+    --r:3px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--text);
+    font:12.5px/1.45 "Segoe UI", system-ui, sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+    user-select:none;
+  }
+  button{
+    font:inherit; color:var(--text); background:var(--ctl);
+    border:1px solid var(--line2); border-radius:var(--r);
+    padding:4px 10px; cursor:pointer;
+  }
+  button:hover:not(:disabled){background:#30353b; border-color:#4a5158;}
+  button:active:not(:disabled){background:#26292e;}
+  button:disabled{opacity:.38; cursor:default;}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#10161d; font-weight:600;}
+  button.primary:hover:not(:disabled){background:var(--accent-h); border-color:var(--accent-h);}
+  button.icon{display:inline-flex; align-items:center; justify-content:center; width:30px; height:24px; padding:0;}
+  button.icon svg{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round;}
+  input,select{font:inherit; color:var(--text); background:var(--ctl);
+    border:1px solid var(--line2); border-radius:var(--r); padding:3px 7px; outline:none;}
+  input:focus,select:focus{border-color:var(--accent);}
+  input[type=number]{width:66px;}
+  input[type=range]{appearance:none; -webkit-appearance:none; width:100%; height:3px;
+    background:var(--line2); border:none; border-radius:2px; padding:0; cursor:pointer;}
+  input[type=range]::-webkit-slider-thumb{appearance:none; -webkit-appearance:none;
+    width:11px; height:11px; border-radius:50%; background:var(--text); cursor:pointer;}
+  input[type=range]:hover::-webkit-slider-thumb{background:var(--accent-h);}
+  input[type=checkbox]{accent-color:var(--accent);}
+  label{color:var(--dim); font-size:12px;}
+  kbd{
+    font:11px Consolas, monospace; background:var(--panel2); border:1px solid var(--line2);
+    border-bottom-width:2px; border-radius:3px; padding:0 4px; color:var(--dim);
+  }
+
+  /* ---- top bar ---- */
+  header{
+    display:flex; align-items:center; height:42px; padding:0 12px; flex:0 0 auto;
+    background:var(--panel); border-bottom:1px solid var(--line);
+  }
+  .brand{font-size:13px; font-weight:600; letter-spacing:.2px;}
+  .brand span{color:var(--faint); font-weight:400; font-size:11px; margin-left:8px;}
+  .tb-actions{margin-left:auto; display:flex; gap:6px; align-items:center;}
+  .tb-sep{width:1px; height:18px; background:var(--line); margin:0 4px;}
+
+  main{flex:1; display:flex; min-height:0;}
+  #viewport{flex:1; position:relative; overflow:auto; min-width:0; background:var(--bg); display:flex;}
+
+  /* ---- drop zone ---- */
+  #dropzone{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  }
+  #dropzone .box{
+    border:1px dashed var(--line2); border-radius:4px; padding:44px 64px;
+    text-align:center; color:var(--dim); background:var(--panel);
+  }
+  #dropzone.drag .box{border-color:var(--accent); color:var(--text);}
+  #dropzone .t1{font-size:14px; color:var(--text); margin-bottom:8px;}
+  #dropzone .t2{font-size:12px;}
+
+  /* ---- canvas stage ---- */
+  #stage{margin:auto; padding:20px; display:flex; flex-direction:column; align-items:center; gap:8px;}
+  #stage[hidden]{display:none;}
+  #canvasWrap{
+    position:relative; line-height:0; border:1px solid #000;
+    background:repeating-conic-gradient(#1e2126 0% 25%, #191c20 0% 50%) 0 0/16px 16px;
+  }
+  #preview{display:block;}
+  #cropOverlay{position:absolute; inset:0; display:none; cursor:crosshair;}
+  #statusbar{
+    display:flex; gap:14px; align-items:center; color:var(--dim); font-size:11.5px;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  #statusbar .zbtns{display:flex; gap:1px;}
+  #statusbar .zbtns button{border-radius:0; padding:1px 8px; font-size:11.5px; color:var(--dim); background:transparent; border-color:var(--line);}
+  #statusbar .zbtns button:hover{color:var(--text);}
+  #statusbar .zbtns button:first-child{border-radius:var(--r) 0 0 var(--r);}
+  #statusbar .zbtns button:last-child{border-radius:0 var(--r) var(--r) 0;}
+
+  /* ---- sidebar ---- */
+  aside{
+    width:272px; flex:0 0 auto; background:var(--panel); border-left:1px solid var(--line);
+    overflow-y:auto; padding:10px; display:flex; flex-direction:column; gap:10px;
+  }
+  section{
+    background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:10px 11px;
+  }
+  section h3{
+    font-size:10.5px; font-weight:600; letter-spacing:1.1px; text-transform:uppercase;
+    color:var(--dim); margin-bottom:9px; display:flex; justify-content:space-between; align-items:center;
+  }
+  section h3 .mini{font-size:10.5px; padding:0 6px; letter-spacing:0; text-transform:none; color:var(--dim); background:transparent; border-color:var(--line);}
+  section h3 .mini:hover{color:var(--text);}
+  .ctl{margin-bottom:8px;}
+  .ctl:last-child{margin-bottom:0;}
+  .ctl .row{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px;}
+  .ctl .val{font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums;}
+  .btnrow{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:7px;}
+  .btnrow:last-child{margin-bottom:0;}
+  .btnrow button{flex:1; padding:4px 2px; font-size:12px;}
+  #presetGrid{display:grid; grid-template-columns:repeat(3,1fr); gap:5px;}
+  #presetGrid button{padding:4px 2px; font-size:11.5px; color:var(--dim);}
+  #presetGrid button:hover{color:var(--text);}
+  #presetGrid button.sel{border-color:var(--accent); color:var(--text); background:#28313d;}
+  .croptools{display:none; margin-top:9px; padding-top:9px; border-top:1px solid var(--line);}
+  .croptools.on{display:block;}
+  .resizegrid{display:flex; gap:6px; align-items:center; margin-bottom:8px;}
+  .resizegrid span{color:var(--faint);}
+  #estLine{color:var(--dim); font-size:11.5px; margin-top:8px; min-height:15px; font-variant-numeric:tabular-nums;}
+
+  #toast{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(60px);
+    background:var(--panel2); border:1px solid var(--line2); color:var(--text);
+    padding:6px 14px; border-radius:4px; font-size:12px; opacity:0;
+    transition:.2s; pointer-events:none; z-index:50;
+  }
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-thumb{background:#2e3238; border-radius:5px; border:2px solid var(--panel);}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">WebP Workshop <span>v1.1</span></div>
+  <div class="tb-actions">
+    <button id="btnOpen">Open&hellip;</button>
+    <div class="tb-sep"></div>
+    <button id="btnUndo" class="icon" disabled title="Undo (Ctrl+Z)">
+      <svg viewBox="0 0 16 16"><path d="M6.5 4 3 7.5 6.5 11M3 7.5h6.5a3.5 3.5 0 0 1 0 7H7"/></svg>
+    </button>
+    <button id="btnRedo" class="icon" disabled title="Redo (Ctrl+Y)">
+      <svg viewBox="0 0 16 16"><path d="M9.5 4 13 7.5 9.5 11M13 7.5H6.5a3.5 3.5 0 0 0 0 7H9"/></svg>
+    </button>
+    <button id="btnReset" disabled title="Revert all edits">Reset</button>
+    <div class="tb-sep"></div>
+    <button id="btnCompare" disabled title="Press and hold to view the original (C)">Original</button>
+    <button id="btnExport" class="primary" disabled title="Download (Ctrl+S)">Export&hellip;</button>
+  </div>
+</header>
+
+<main>
+  <div id="viewport">
+    <div id="dropzone">
+      <div class="box">
+        <div class="t1">Open an image to start editing</div>
+        <div class="t2">Drag &amp; drop anywhere, or <button id="btnOpen2" style="padding:0 4px">browse</button></div>
+        <div class="t2" style="margin-top:10px; color:var(--faint)">WebP &middot; PNG &middot; JPEG &nbsp;&mdash;&nbsp; files never leave your machine</div>
+      </div>
+    </div>
+    <div id="stage" hidden>
+      <div id="canvasWrap">
+        <canvas id="preview"></canvas>
+        <canvas id="cropOverlay"></canvas>
+      </div>
+      <div id="statusbar">
+        <span id="stName"></span>
+        <span id="stDims"></span>
+        <span id="stZoom"></span>
+        <div class="zbtns">
+          <button id="zOut" title="Zoom out">&minus;</button>
+          <button id="zFit" title="Fit to window">Fit</button>
+          <button id="z100" title="Actual pixels">1:1</button>
+          <button id="zIn" title="Zoom in">+</button>
+        </div>
+        <span style="color:var(--faint)">hold <kbd>C</kbd> for original</span>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <section>
+      <h3>Presets</h3>
+      <div id="presetGrid"></div>
+    </section>
+
+    <section>
+      <h3>Adjust <button class="mini" id="rstAdjust">reset</button></h3>
+      <div class="ctl"><div class="row"><label>Brightness</label><span class="val" id="v_brightness"></span></div>
+        <input type="range" id="s_brightness" min="30" max="180" value="100"></div>
+      <div class="ctl"><div class="row"><label>Contrast</label><span class="val" id="v_contrast"></span></div>
+        <input type="range" id="s_contrast" min="30" max="180" value="100"></div>
+      <div class="ctl"><div class="row"><label>Saturation</label><span class="val" id="v_saturate"></span></div>
+        <input type="range" id="s_saturate" min="0" max="250" value="100"></div>
+      <div class="ctl"><div class="row"><label>Temperature</label><span class="val" id="v_temperature"></span></div>
+        <input type="range" id="s_temperature" min="-100" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Tint</label><span class="val" id="v_tint"></span></div>
+        <input type="range" id="s_tint" min="-100" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Hue</label><span class="val" id="v_hue"></span></div>
+        <input type="range" id="s_hue" min="-180" max="180" value="0"></div>
+      <div class="ctl"><div class="row"><label>Blur</label><span class="val" id="v_blur"></span></div>
+        <input type="range" id="s_blur" min="0" max="20" step="0.1" value="0"></div>
+      <div class="ctl"><div class="row"><label>Grayscale</label><span class="val" id="v_grayscale"></span></div>
+        <input type="range" id="s_grayscale" min="0" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Sepia</label><span class="val" id="v_sepia"></span></div>
+        <input type="range" id="s_sepia" min="0" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Invert</label><span class="val" id="v_invert"></span></div>
+        <input type="range" id="s_invert" min="0" max="100" value="0"></div>
+    </section>
+
+    <section>
+      <h3>Effects <button class="mini" id="rstFx">reset</button></h3>
+      <div class="ctl"><div class="row"><label>Sharpen</label><span class="val" id="v_sharpen"></span></div>
+        <input type="range" id="s_sharpen" min="0" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Vignette</label><span class="val" id="v_vignette"></span></div>
+        <input type="range" id="s_vignette" min="0" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Grain</label><span class="val" id="v_grain"></span></div>
+        <input type="range" id="s_grain" min="0" max="100" value="0"></div>
+      <div class="ctl"><div class="row"><label>Pixelate</label><span class="val" id="v_pixelate"></span></div>
+        <input type="range" id="s_pixelate" min="0" max="24" value="0"></div>
+    </section>
+
+    <section>
+      <h3>Transform</h3>
+      <div class="btnrow">
+        <button id="rotL" class="icon" title="Rotate 90&deg; left">
+          <svg viewBox="0 0 16 16"><path d="M2.5 7.5A5.5 5.5 0 1 1 8 13"/><path d="M5 2.5 2.5 5 5 7.5"/></svg>
+        </button>
+        <button id="rotR" class="icon" title="Rotate 90&deg; right">
+          <svg viewBox="0 0 16 16"><path d="M13.5 7.5A5.5 5.5 0 1 0 8 13"/><path d="M11 2.5 13.5 5 11 7.5"/></svg>
+        </button>
+        <button id="flipH" class="icon" title="Flip horizontal">
+          <svg viewBox="0 0 16 16"><path d="M8 1.5v13" stroke-dasharray="2 1.6"/><path d="M6 5 2 8l4 3z" fill="currentColor" stroke="none"/><path d="M10 5l4 3-4 3z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="flipV" class="icon" title="Flip vertical">
+          <svg viewBox="0 0 16 16"><path d="M1.5 8h13" stroke-dasharray="2 1.6"/><path d="M5 6 8 2l3 4z" fill="currentColor" stroke="none"/><path d="M5 10l3 4 3-4z" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <div class="btnrow"><button id="btnCrop">Crop&hellip;</button></div>
+      <div class="croptools" id="cropTools">
+        <div class="btnrow">
+          <button data-aspect="" class="aspBtn">Free</button>
+          <button data-aspect="1" class="aspBtn">1:1</button>
+          <button data-aspect="1.3333" class="aspBtn">4:3</button>
+          <button data-aspect="1.7778" class="aspBtn">16:9</button>
+        </div>
+        <div class="btnrow">
+          <button id="cropApply" class="primary" style="flex:2">Apply</button>
+          <button id="cropCancel">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>Resize</h3>
+      <div class="resizegrid">
+        <input type="number" id="rzW" min="1"> <span>&times;</span> <input type="number" id="rzH" min="1">
+        <label style="white-space:nowrap"><input type="checkbox" id="rzLock" checked> lock</label>
+      </div>
+      <div class="btnrow">
+        <button data-pct="100">100%</button>
+        <button data-pct="75">75%</button>
+        <button data-pct="50">50%</button>
+        <button data-pct="25">25%</button>
+      </div>
+      <button id="rzApply" style="width:100%">Apply</button>
+    </section>
+
+    <section>
+      <h3>Export</h3>
+      <div class="resizegrid" style="margin-bottom:8px">
+        <select id="exFormat" style="flex:1">
+          <option value="webp">WebP</option>
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select>
+        <label style="white-space:nowrap">Quality</label>
+        <span class="val" id="v_quality" style="width:30px;text-align:right">90</span>
+      </div>
+      <input type="range" id="exQuality" min="1" max="100" value="90">
+      <div id="estLine"></div>
+      <button id="exDownload" class="primary" style="width:100%; margin-top:8px">Download</button>
+    </section>
+  </aside>
+</main>
+
+<div id="toast"></div>
+<input type="file" id="fileInput" accept="image/webp,image/png,image/jpeg,image/*" hidden>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const els = {
+  viewport:$("viewport"), stage:$("stage"), dz:$("dropzone"),
+  preview:$("preview"), overlay:$("cropOverlay"), wrap:$("canvasWrap"),
+  file:$("fileInput"),
+  undo:$("btnUndo"), redo:$("btnRedo"), reset:$("btnReset"),
+  compare:$("btnCompare"), exportBtn:$("btnExport"),
+  stName:$("stName"), stDims:$("stDims"), stZoom:$("stZoom"),
+  rzW:$("rzW"), rzH:$("rzH"), rzLock:$("rzLock"),
+  cropTools:$("cropTools"), cropBtn:$("btnCrop"),
+  exFormat:$("exFormat"), exQuality:$("exQuality"), estLine:$("estLine"),
+  toast:$("toast"),
+};
+
+const S = {
+  src:null,               // working full-res canvas
+  fileName:"", fileSize:0,
+  history:[], hIdx:-1,
+  adjust:{brightness:100, contrast:100, saturate:100, temperature:0, tint:0, hue:0, blur:0, grayscale:0, sepia:0, invert:0},
+  fx:{sharpen:0, vignette:0, grain:0, pixelate:0},
+  zoom:"fit",             // "fit" or number multiplier
+  cropMode:false, cropRect:null, cropAspect:null,
+  comparing:false,
+};
+const DEF_ADJUST = {...S.adjust}, DEF_FX = {...S.fx};
+const PREVIEW_CAP = 1600;   // max long edge of preview buffer
+const HIST_MAX = 25;
+const WEBP_OK = document.createElement("canvas").toDataURL("image/webp").indexOf("data:image/webp") === 0;
+
+/* ---------- helpers ---------- */
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+function cloneCanvas(c){
+  const n = document.createElement("canvas");
+  n.width = c.width; n.height = c.height;
+  n.getContext("2d").drawImage(c, 0, 0);
+  return n;
+}
+function toast(msg){
+  els.toast.textContent = msg;
+  els.toast.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>els.toast.classList.remove("show"), 2400);
+}
+
+/* ---------- history ---------- */
+function stateSnapshot(){ return {src:cloneCanvas(S.src), adjust:{...S.adjust}, fx:{...S.fx}}; }
+function pushHistory(){
+  S.history.length = S.hIdx + 1;
+  S.history.push(stateSnapshot());
+  if (S.history.length > HIST_MAX) S.history.shift();
+  S.hIdx = S.history.length - 1;
+  updateHistUI();
+}
+function restore(i){
+  const h = S.history[i];
+  S.src = cloneCanvas(h.src);
+  S.adjust = {...h.adjust}; S.fx = {...h.fx};
+  S.hIdx = i; S.cropMode = false; S.cropRect = null; S.zoom = "fit";
+  syncSliderUI(); syncResizeInputs(); syncCropUI(); markPreset();
+  updateHistUI(); renderPreview();
+}
+function updateHistUI(){
+  els.undo.disabled = S.hIdx <= 0;
+  els.redo.disabled = S.hIdx >= S.history.length - 1;
+  els.reset.disabled = S.hIdx === 0;
+  els.exportBtn.disabled = !S.src;
+  els.compare.disabled = !S.src;
+}
+function currentEqualsTop(){
+  if (S.hIdx < 0) return false;
+  const t = S.history[S.hIdx];
+  return S.src.width === t.src.width && S.src.height === t.src.height &&
+    JSON.stringify(S.adjust) === JSON.stringify(t.adjust) &&
+    JSON.stringify(S.fx) === JSON.stringify(t.fx);
+}
+function commitIfChanged(){
+  if (S.src && !currentEqualsTop()) pushHistory();
+}
+
+/* ---------- pipeline: filter string & pixel effects ---------- */
+const UNIT = {brightness:"%", contrast:"%", saturate:"%", hue:"\u00b0", blur:" px",
+  grayscale:"%", sepia:"%", invert:"%", temperature:"", tint:"", sharpen:"", vignette:"", grain:"", pixelate:" px"};
+
+function filterString(scale = 1){
+  const a = S.adjust;
+  const blurPx = (a.blur * scale).toFixed(2);
+  return `brightness(${a.brightness}%) contrast(${a.contrast}%) saturate(${a.saturate}%) ` +
+         `hue-rotate(${a.hue}deg) blur(${blurPx}px) grayscale(${a.grayscale}%) ` +
+         `sepia(${a.sepia}%) invert(${a.invert}%)`;
+}
+function isNeutral(){
+  const a = S.adjust, f = S.fx;
+  return a.brightness===100 && a.contrast===100 && a.saturate===100 && a.hue===0 &&
+         a.blur===0 && a.grayscale===0 && a.sepia===0 && a.invert===0 &&
+         a.temperature===0 && a.tint===0 &&
+         f.sharpen===0 && f.vignette===0 && f.grain===0 && f.pixelate===0;
+}
+function applyColorShift(ctx, w, h){
+  const t = S.adjust.temperature, ti = S.adjust.tint;
+  if (!t && !ti) return;
+  const img = ctx.getImageData(0, 0, w, h), d = img.data;
+  const rt = t * 0.30, bt = -t * 0.30, gt = ti * 0.30, mo = -ti * 0.15;
+  for (let i = 0; i < d.length; i += 4){
+    d[i]   = clamp(d[i]   + rt + mo, 0, 255) | 0;
+    d[i+1] = clamp(d[i+1] + gt,      0, 255) | 0;
+    d[i+2] = clamp(d[i+2] + bt + mo, 0, 255) | 0;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+function applyFX(ctx, w, h, scale){
+  applyColorShift(ctx, w, h);
+  if (S.fx.pixelate > 1){
+    const block = Math.max(2, Math.round(S.fx.pixelate * scale));
+    const sw = Math.max(1, Math.round(w / block)), sh = Math.max(1, Math.round(h / block));
+    const t = document.createElement("canvas"); t.width = sw; t.height = sh;
+    const tc = t.getContext("2d");
+    tc.drawImage(ctx.canvas, 0, 0, sw, sh);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(t, 0, 0, sw, sh, 0, 0, w, h);
+    ctx.imageSmoothingEnabled = true;
+  }
+  if (S.fx.sharpen > 0) applySharpen(ctx, w, h, S.fx.sharpen);
+  if (S.fx.vignette > 0){
+    const r = Math.hypot(w, h) / 2;
+    const g = ctx.createRadialGradient(w/2, h/2, r*0.5, w/2, h/2, r);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, `rgba(0,0,0,${(S.fx.vignette/100*0.85).toFixed(3)})`);
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+  if (S.fx.grain > 0) applyGrain(ctx, w, h, S.fx.grain);
+}
+function applySharpen(ctx, w, h, amount){
+  if (w < 3 || h < 3) return;
+  const src = ctx.getImageData(0, 0, w, h);
+  const out = ctx.createImageData(w, h);
+  const s = src.data, o = out.data;
+  const a = amount / 100;
+  for (let y = 0; y < h; y++){
+    const ym = y > 0 ? -w : 0, yp = y < h-1 ? w : 0;
+    for (let x = 0; x < w; x++){
+      const xm = x > 0 ? -4 : 0, xp = x < w-1 ? 4 : 0;
+      const i = (y*w + x) * 4;
+      for (let c = 0; c < 3; c++){
+        const p = i + c;
+        const v = s[p]*5 - s[p+xm+ym] - s[p+xm+yp] - s[p+xp+ym] - s[p+xp+yp];
+        o[p] = clamp(s[p] * (1-a) + v * a, 0, 255) | 0;
+      }
+      o[i+3] = s[i+3];
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+}
+function applyGrain(ctx, w, h, amount){
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const strength = amount * 0.6;
+  for (let i = 0; i < d.length; i += 4){
+    const n = (Math.random() - 0.5) * strength * 2;
+    d[i]   = clamp(d[i]   + n, 0, 255) | 0;
+    d[i+1] = clamp(d[i+1] + n, 0, 255) | 0;
+    d[i+2] = clamp(d[i+2] + n, 0, 255) | 0;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/* ---------- preview rendering ---------- */
+let renderQueued = false;
+function requestRender(){
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(()=>{ renderQueued = false; renderPreview(); });
+}
+function renderPreview(bypass = false){
+  if (!S.src) return;
+  const scale = Math.min(1, PREVIEW_CAP / Math.max(S.src.width, S.src.height));
+  const w = Math.max(1, Math.round(S.src.width * scale));
+  const h = Math.max(1, Math.round(S.src.height * scale));
+  els.preview.width = w; els.preview.height = h;
+  const ctx = els.preview.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.filter = bypass ? "none" : filterString(scale);
+  ctx.drawImage(S.src, 0, 0, w, h);
+  ctx.filter = "none";
+  if (!bypass) applyFX(ctx, w, h, scale);
+  syncOverlaySize();
+  fitView();
+}
+
+/* ---------- view / zoom ---------- */
+function fitView(){
+  if (!S.src) return;
+  const availW = els.viewport.clientWidth - 64;
+  const availH = els.viewport.clientHeight - 96;
+  let z;
+  if (S.zoom === "fit") z = Math.min(availW / els.preview.width, availH / els.preview.height, 1);
+  else z = S.zoom;
+  z = Math.max(0.02, z);
+  els.preview.style.width = Math.round(els.preview.width * z) + "px";
+  els.preview.style.height = Math.round(els.preview.height * z) + "px";
+  els.stZoom.textContent = Math.round(z * 100) + "%";
+  syncOverlaySize();
+  drawCropOverlay();
+}
+function syncOverlaySize(){
+  els.overlay.style.width = els.preview.style.width;
+  els.overlay.style.height = els.preview.style.height;
+  const dpr = window.devicePixelRatio || 1;
+  const cw = parseFloat(els.preview.style.width) || els.preview.width;
+  const ch = parseFloat(els.preview.style.height) || els.preview.height;
+  els.overlay.width = Math.round(cw * dpr);
+  els.overlay.height = Math.round(ch * dpr);
+}
+window.addEventListener("resize", fitView);
+
+/* ---------- open / load ---------- */
+function openFile(file){
+  if (!file || !file.type.startsWith("image/")){ toast("Not an image file"); return; }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img, 0, 0);
+    S.src = c;
+    S.fileName = file.name.replace(/\.[^.]+$/, "");
+    S.fileSize = file.size;
+    S.adjust = {...DEF_ADJUST}; S.fx = {...DEF_FX};
+    S.history = []; S.hIdx = -1;
+    S.zoom = "fit"; S.cropMode = false; S.cropRect = null;
+    pushHistory();
+    syncSliderUI(); syncResizeInputs(); syncCropUI(); markPreset();
+    els.dz.style.display = "none";
+    els.stage.hidden = false;
+    renderPreview();
+    els.stName.textContent = file.name;
+    els.stDims.textContent = `${img.naturalWidth}\u00d7${img.naturalHeight}`;
+    updateEstimate();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast("Could not decode this image"); };
+  img.src = url;
+}
+els.file.addEventListener("change", e => { openFile(e.target.files[0]); els.file.value = ""; });
+$("btnOpen").addEventListener("click", () => els.file.click());
+$("btnOpen2").addEventListener("click", () => els.file.click());
+
+["dragover","dragenter"].forEach(ev => document.body.addEventListener(ev, e => {
+  e.preventDefault(); els.dz.classList.add("drag");
+}));
+["dragleave","drop"].forEach(ev => document.body.addEventListener(ev, e => {
+  e.preventDefault(); els.dz.classList.remove("drag");
+}));
+document.body.addEventListener("drop", e => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) openFile(f);
+});
+
+/* ---------- sliders ---------- */
+const SLIDERS = [
+  ["brightness","adjust"], ["contrast","adjust"], ["saturate","adjust"],
+  ["temperature","adjust"], ["tint","adjust"], ["hue","adjust"], ["blur","adjust"],
+  ["grayscale","adjust"], ["sepia","adjust"], ["invert","adjust"],
+  ["sharpen","fx"], ["vignette","fx"], ["grain","fx"], ["pixelate","fx"],
+];
+const SIGNED = new Set(["temperature","tint","hue"]);
+function fmtVal(key, v){
+  const sign = SIGNED.has(key) && v > 0 ? "+" : "";
+  return sign + v + UNIT[key];
+}
+function updateValLabel(key){
+  const grp = key in S.adjust ? "adjust" : "fx";
+  $("v_" + key).textContent = fmtVal(key, S[grp][key]);
+}
+function syncSliderUI(){
+  for (const [key, grp] of SLIDERS) $("s_" + key).value = S[grp][key];
+  for (const [key] of SLIDERS) updateValLabel(key);
+}
+for (const [key, grp] of SLIDERS){
+  const el = $("s_" + key);
+  el.addEventListener("input", () => {
+    S[grp][key] = parseFloat(el.value);
+    updateValLabel(key);
+    markPreset();
+    requestRender();
+    updateEstimate();
+  });
+  el.addEventListener("change", commitIfChanged);
+  el.addEventListener("dblclick", () => {
+    S[grp][key] = parseFloat(el.defaultValue);
+    el.value = el.defaultValue;
+    updateValLabel(key);
+    markPreset();
+    requestRender();
+    updateEstimate();
+    commitIfChanged();
+  });
+}
+$("rstAdjust").addEventListener("click", () => {
+  S.adjust = {...DEF_ADJUST}; syncSliderUI(); markPreset(); requestRender(); commitIfChanged(); updateEstimate();
+});
+$("rstFx").addEventListener("click", () => {
+  S.fx = {...DEF_FX}; syncSliderUI(); markPreset(); requestRender(); commitIfChanged(); updateEstimate();
+});
+$("btnReset").addEventListener("click", () => {
+  if (!S.src || S.hIdx <= 0) return;
+  restore(0);
+  toast("All edits reverted");
+});
+
+/* ---------- presets ---------- */
+const PRESETS = {
+  "Original": {a:{}, f:{}},
+  "Vivid":    {a:{saturate:130, contrast:107, brightness:101}, f:{sharpen:14}},
+  "Warm":     {a:{temperature:40, saturate:106}, f:{}},
+  "Cool":     {a:{temperature:-40, saturate:104}, f:{}},
+  "Noir":     {a:{grayscale:100, contrast:124, brightness:97}, f:{vignette:28, grain:10}},
+  "Sepia":    {a:{sepia:75, contrast:104}, f:{}},
+  "Vintage":  {a:{sepia:32, saturate:82, contrast:92, temperature:22}, f:{vignette:32, grain:16}},
+  "Faded":    {a:{contrast:86, saturate:78, brightness:104, temperature:-8}, f:{grain:6}},
+  "Punch":    {a:{contrast:118, saturate:118}, f:{sharpen:24}},
+  "Chrome":   {a:{grayscale:100, contrast:135}, f:{sharpen:20}},
+  "Matte":    {a:{contrast:88, brightness:103, saturate:92}, f:{}},
+  "Cinema":   {a:{saturate:92, contrast:110, temperature:-14, tint:-10}, f:{vignette:24, grain:8}},
+};
+function markPreset(){
+  let cur = "Original";
+  for (const [name, p] of Object.entries(PRESETS)){
+    const a = {...DEF_ADJUST, ...p.a}, f = {...DEF_FX, ...p.f};
+    if (JSON.stringify(a) === JSON.stringify(S.adjust) && JSON.stringify(f) === JSON.stringify(S.fx)){
+      cur = name; break;
+    }
+  }
+  document.querySelectorAll("#presetGrid button").forEach(b =>
+    b.classList.toggle("sel", b.textContent === cur));
+}
+(function buildPresets(){
+  const grid = $("presetGrid");
+  for (const name of Object.keys(PRESETS)){
+    const b = document.createElement("button");
+    b.textContent = name;
+    b.addEventListener("click", () => {
+      const p = PRESETS[name];
+      S.adjust = {...DEF_ADJUST, ...p.a};
+      S.fx = {...DEF_FX, ...p.f};
+      syncSliderUI(); markPreset(); requestRender(); commitIfChanged(); updateEstimate();
+    });
+    grid.appendChild(b);
+  }
+})();
+markPreset();
+
+/* ---------- transform ---------- */
+function bake(newCanvas){
+  S.src = newCanvas;
+  S.zoom = "fit";
+  pushHistory();
+  renderPreview();
+  syncResizeInputs();
+  updateEstimate();
+}
+function rotateCanvas(src, dir){ // dir 1 = clockwise
+  const c = document.createElement("canvas");
+  c.width = src.height; c.height = src.width;
+  const ctx = c.getContext("2d");
+  ctx.translate(c.width/2, c.height/2);
+  ctx.rotate(dir * Math.PI/2);
+  ctx.drawImage(src, -src.width/2, -src.height/2);
+  return c;
+}
+function flipCanvas(src, horiz){
+  const c = document.createElement("canvas");
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext("2d");
+  ctx.translate(horiz ? src.width : 0, horiz ? 0 : src.height);
+  ctx.scale(horiz ? -1 : 1, horiz ? 1 : -1);
+  ctx.drawImage(src, 0, 0);
+  return c;
+}
+$("rotR").addEventListener("click", () => S.src && bake(rotateCanvas(S.src, 1)));
+$("rotL").addEventListener("click", () => S.src && bake(rotateCanvas(S.src, -1)));
+$("flipH").addEventListener("click", () => S.src && bake(flipCanvas(S.src, true)));
+$("flipV").addEventListener("click", () => S.src && bake(flipCanvas(S.src, false)));
+
+/* ---------- crop ---------- */
+function syncCropUI(){
+  els.cropTools.classList.toggle("on", S.cropMode);
+  els.overlay.style.display = S.cropMode ? "block" : "none";
+  drawCropOverlay();
+}
+$("btnCrop").addEventListener("click", () => {
+  if (!S.src) return;
+  S.cropMode = !S.cropMode;
+  S.cropRect = null;
+  syncCropUI();
+  if (S.cropMode) toast("Drag a rectangle on the image");
+});
+document.querySelectorAll(".aspBtn").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".aspBtn").forEach(x => x.style.borderColor = "");
+  b.style.borderColor = "var(--accent)";
+  S.cropAspect = b.dataset.aspect ? parseFloat(b.dataset.aspect) : null;
+  if (S.cropRect) fitCropAspect();
+  drawCropOverlay();
+}));
+function fitCropAspect(){
+  if (!S.cropAspect || !S.cropRect) return;
+  const r = S.cropRect, W = els.preview.width, H = els.preview.height;
+  let w = r.w, h = w / S.cropAspect;
+  if (h > H){ h = H; w = h * S.cropAspect; }
+  r.w = Math.min(w, W); r.h = Math.min(h, H);
+  r.x = clamp(r.x, 0, W - r.w); r.y = clamp(r.y, 0, H - r.h);
+}
+function ovPos(e){
+  const rect = els.overlay.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  return {
+    x: clamp((e.clientX - rect.left) * dpr, 0, els.overlay.width),
+    y: clamp((e.clientY - rect.top) * dpr, 0, els.overlay.height),
+  };
+}
+els.overlay.addEventListener("pointerdown", e => {
+  if (!S.cropMode) return;
+  els.overlay.setPointerCapture(e.pointerId);
+  const p = ovPos(e);
+  S.cropRect = {x:p.x, y:p.y, w:1, h:1};
+  S._dragStart = p;
+});
+els.overlay.addEventListener("pointermove", e => {
+  if (!S.cropMode || !S._dragStart || !S.cropRect) return;
+  const p = ovPos(e), s = S._dragStart, W = els.overlay.width, H = els.overlay.height;
+  let x1 = Math.min(s.x, p.x), y1 = Math.min(s.y, p.y);
+  let w = Math.abs(p.x - s.x), h = Math.abs(p.y - s.y);
+  if (S.cropAspect){
+    w = Math.max(w, 4);
+    h = w / S.cropAspect;
+    if (y1 + h > H) h = H - y1, w = h * S.cropAspect;
+    if (p.y < s.y) y1 = Math.max(0, s.y - h), w = h * S.cropAspect;
+  }
+  S.cropRect = {x:clamp(x1,0,W-4), y:clamp(y1,0,H-4), w:Math.max(4,w), h:Math.max(4,h)};
+  drawCropOverlay();
+});
+function endCropDrag(){
+  S._dragStart = null;
+  if (S.cropRect && (S.cropRect.w < 8 || S.cropRect.h < 8)) S.cropRect = null;
+  drawCropOverlay();
+}
+els.overlay.addEventListener("pointerup", endCropDrag);
+els.overlay.addEventListener("pointercancel", endCropDrag);
+function drawCropOverlay(){
+  if (!S.cropMode) return;
+  const ctx = els.overlay.getContext("2d");
+  const W = els.overlay.width, H = els.overlay.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!S.cropRect) return;
+  const r = S.cropRect;
+  ctx.fillStyle = "rgba(10,12,15,.62)";
+  ctx.fillRect(0, 0, W, r.y);
+  ctx.fillRect(0, r.y, r.x, r.h);
+  ctx.fillRect(r.x + r.w, r.y, W - r.x - r.w, r.h);
+  ctx.fillRect(0, r.y + r.h, W, H - r.y - r.h);
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(2, W/500);
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1;
+  for (let i = 1; i < 3; i++){
+    ctx.beginPath(); ctx.moveTo(r.x + r.w*i/3, r.y); ctx.lineTo(r.x + r.w*i/3, r.y + r.h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(r.x, r.y + r.h*i/3); ctx.lineTo(r.x + r.w, r.y + r.h*i/3); ctx.stroke();
+  }
+}
+$("cropApply").addEventListener("click", () => {
+  if (!S.src || !S.cropRect) { toast("Drag a crop rectangle first"); return; }
+  const sx = S.src.width / els.overlay.width, sy = S.src.height / els.overlay.height;
+  const cx = Math.round(S.cropRect.x * sx), cy = Math.round(S.cropRect.y * sy);
+  const cw = Math.max(1, Math.round(S.cropRect.w * sx)), ch = Math.max(1, Math.round(S.cropRect.h * sy));
+  const c = document.createElement("canvas");
+  c.width = cw; c.height = ch;
+  c.getContext("2d").drawImage(S.src, cx, cy, cw, ch, 0, 0, cw, ch);
+  S.cropMode = false; S.cropRect = null;
+  bake(c);
+  toast(`Cropped to ${cw}\u00d7${ch}`);
+});
+$("cropCancel").addEventListener("click", () => {
+  S.cropMode = false; S.cropRect = null;
+  syncCropUI();
+});
+
+/* ---------- resize ---------- */
+function syncResizeInputs(){
+  if (!S.src) return;
+  els.rzW.value = S.src.width;
+  els.rzH.value = S.src.height;
+}
+function onRzInput(changed){
+  if (!S.src) return;
+  const w = parseInt(els.rzW.value) || 1, h = parseInt(els.rzH.value) || 1;
+  if (els.rzLock.checked && changed){
+    const ar = S.src.width / S.src.height;
+    if (changed === "w") els.rzH.value = Math.max(1, Math.round(w / ar));
+    else els.rzW.value = Math.max(1, Math.round(h * ar));
+  }
+}
+els.rzW.addEventListener("input", () => onRzInput("w"));
+els.rzH.addEventListener("input", () => onRzInput("h"));
+document.querySelectorAll("[data-pct]").forEach(b => b.addEventListener("click", () => {
+  if (!S.src) return;
+  const p = parseInt(b.dataset.pct) / 100;
+  els.rzW.value = Math.max(1, Math.round(S.src.width * p));
+  els.rzH.value = Math.max(1, Math.round(S.src.height * p));
+}));
+$("rzApply").addEventListener("click", () => {
+  if (!S.src) return;
+  const w = clamp(parseInt(els.rzW.value) || 0, 1, 10000);
+  const h = clamp(parseInt(els.rzH.value) || 0, 1, 10000);
+  if (w === S.src.width && h === S.src.height){ toast("Size unchanged"); return; }
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(S.src, 0, 0, w, h);
+  bake(c);
+  toast(`Resized to ${w}\u00d7${h}`);
+});
+
+/* ---------- compare ---------- */
+function setCompare(on){
+  if (!S.src || on === S.comparing) return;
+  S.comparing = on;
+  renderPreview(on);
+}
+$("btnCompare").addEventListener("pointerdown", () => setCompare(true));
+["pointerup","pointerleave"].forEach(ev => $("btnCompare").addEventListener(ev, () => setCompare(false)));
+document.addEventListener("keydown", e => {
+  if (e.code === "KeyC" && !e.repeat && !e.ctrlKey && !e.metaKey) setCompare(true);
+});
+document.addEventListener("keyup", e => { if (e.code === "KeyC") setCompare(false); });
+
+/* ---------- zoom buttons ---------- */
+function zoomStep(mult){
+  const cur = S.zoom === "fit" ? Math.min(
+    (els.viewport.clientWidth - 64) / els.preview.width,
+    (els.viewport.clientHeight - 96) / els.preview.height, 1) : S.zoom;
+  S.zoom = clamp(cur * mult, 0.05, 8);
+  fitView();
+}
+$("zIn").addEventListener("click", () => zoomStep(1.25));
+$("zOut").addEventListener("click", () => zoomStep(0.8));
+$("zFit").addEventListener("click", () => { S.zoom = "fit"; fitView(); });
+$("z100").addEventListener("click", () => { S.zoom = 1; fitView(); });
+els.viewport.addEventListener("dblclick", e => {
+  if (!S.src) return;
+  S.zoom = S.zoom === "fit" ? 1 : "fit";
+  fitView();
+});
+
+/* ---------- export ---------- */
+function buildOutput(){
+  const c = document.createElement("canvas");
+  c.width = S.src.width; c.height = S.src.height;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  if (!isNeutral()){
+    ctx.filter = filterString(1);
+    ctx.drawImage(S.src, 0, 0);
+    ctx.filter = "none";
+    applyFX(ctx, c.width, c.height, 1);
+  } else {
+    ctx.drawImage(S.src, 0, 0);
+  }
+  return c;
+}
+let estTimer = null;
+function updateEstimate(){
+  clearTimeout(estTimer);
+  if (!S.src) return;
+  estTimer = setTimeout(async () => {
+    const fmt = els.exFormat.value;
+    const q = parseInt(els.exQuality.value) / 100;
+    const blob = await new Promise(res => buildOutput().toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
+    if (!blob){ els.estLine.textContent = "Encoding not supported by this browser"; return; }
+    els.estLine.textContent = `${S.src.width}\u00d7${S.src.height} \u00b7 ${fmtSize(blob.size)}` +
+      (S.fileSize ? ` (source: ${fmtSize(S.fileSize)})` : "");
+  }, 350);
+}
+function fmtSize(n){
+  return n > 1048576 ? (n/1048576).toFixed(2) + " MB" : Math.round(n/1024) + " KB";
+}
+els.exFormat.addEventListener("change", () => {
+  els.exQuality.disabled = els.exFormat.value === "png";
+  updateEstimate();
+});
+els.exQuality.addEventListener("input", () => {
+  $("v_quality").textContent = els.exQuality.value;
+  updateEstimate();
+});
+$("exDownload").addEventListener("click", async () => {
+  if (!S.src) return;
+  const fmt = els.exFormat.value;
+  const q = parseInt(els.exQuality.value) / 100;
+  els.estLine.textContent = "Encoding\u2026";
+  await new Promise(r => setTimeout(r, 10));
+  const blob = await new Promise(res => buildOutput().toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
+  if (!blob){ els.estLine.textContent = ""; toast("This browser cannot encode " + fmt.toUpperCase()); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (S.fileName || "image") + "-edited." + (fmt === "jpeg" ? "jpg" : fmt);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  updateEstimate();
+  toast(`Saved ${a.download} (${fmtSize(blob.size)})`);
+});
+
+/* ---------- undo / redo ---------- */
+els.undo.addEventListener("click", () => { if (S.hIdx > 0) restore(S.hIdx - 1); });
+els.redo.addEventListener("click", () => { if (S.hIdx < S.history.length - 1) restore(S.hIdx + 1); });
+
+/* ---------- keyboard ---------- */
+document.addEventListener("keydown", e => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === "z"){
+    e.preventDefault();
+    if (e.shiftKey){ if (S.hIdx < S.history.length-1) restore(S.hIdx + 1); }
+    else if (S.hIdx > 0) restore(S.hIdx - 1);
+  } else if (mod && e.key.toLowerCase() === "y"){
+    e.preventDefault();
+    if (S.hIdx < S.history.length-1) restore(S.hIdx + 1);
+  } else if (mod && e.key.toLowerCase() === "s"){
+    e.preventDefault();
+    $("exDownload").click();
+  } else if (mod && e.key.toLowerCase() === "o"){
+    e.preventDefault();
+    els.file.click();
+  } else if (e.key === "Escape" && S.cropMode){
+    S.cropMode = false; S.cropRect = null; syncCropUI();
+  }
+});
+
+/* initial */
+if (!WEBP_OK){
+  const opt = els.exFormat.querySelector("option[value=webp]");
+  if (opt) opt.disabled = true;
+  els.exFormat.value = "png";
+}
+syncSliderUI();
+</script>
+</body>
+</html>
