@@ -63,9 +63,7 @@
   #viewport{flex:1; position:relative; overflow:auto; min-width:0; background:var(--bg); display:flex;}
 
   /* ---- drop zone ---- */
-  #dropzone{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  }
+  #dropzone{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;}
   #dropzone .box{
     border:1px dashed var(--line2); border-radius:4px; padding:44px 64px;
     text-align:center; color:var(--dim); background:var(--panel);
@@ -123,6 +121,21 @@
   .resizegrid{display:flex; gap:6px; align-items:center; margin-bottom:8px;}
   .resizegrid span{color:var(--faint);}
   #estLine{color:var(--dim); font-size:11.5px; margin-top:8px; min-height:15px; font-variant-numeric:tabular-nums;}
+  .hint{color:var(--faint); font-size:11px; margin-top:7px; line-height:1.5;}
+
+  /* ---- layers ---- */
+  #layerList{max-height:148px; overflow-y:auto; margin-bottom:8px; border:1px solid var(--line); border-radius:3px; background:var(--ctl);}
+  .lrow{display:flex; align-items:center; gap:6px; padding:3px 7px; cursor:pointer; border-bottom:1px solid var(--line);}
+  .lrow:last-child{border-bottom:none;}
+  .lrow.sel{background:#2b3542;}
+  .lrow .eye{background:none; border:none; padding:0; width:17px; height:17px; flex:0 0 auto; color:var(--dim); display:inline-flex; align-items:center; justify-content:center;}
+  .lrow .eye svg{width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.3; stroke-linecap:round; stroke-linejoin:round;}
+  .lrow .eye.off{color:var(--faint);}
+  .lrow .nm{flex:1; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .lrow input.rn{width:100%; font-size:12px; padding:0 4px; height:18px;}
+  .lyctl .row{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px;}
+  .lyctl select{width:100%; margin-bottom:8px;}
+  .lyctl .val{font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums;}
 
   #toast{
     position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(60px);
@@ -139,7 +152,7 @@
 <body>
 
 <header>
-  <div class="brand">WebP Workshop <span>v1.1</span></div>
+  <div class="brand">WebP Workshop <span>v1.2</span></div>
   <div class="tb-actions">
     <button id="btnOpen">Open&hellip;</button>
     <div class="tb-sep"></div>
@@ -180,12 +193,43 @@
           <button id="z100" title="Actual pixels">1:1</button>
           <button id="zIn" title="Zoom in">+</button>
         </div>
-        <span style="color:var(--faint)">hold <kbd>C</kbd> for original</span>
+        <span style="color:var(--faint)">hold <kbd>C</kbd> original &middot; drag moves active layer</span>
       </div>
     </div>
   </div>
 
   <aside>
+    <section>
+      <h3>Layers</h3>
+      <div id="layerList"></div>
+      <div class="lyctl">
+        <select id="lyBlend" title="Blend mode of active layer">
+          <option value="normal">Normal</option>
+          <option value="multiply">Multiply</option>
+          <option value="screen">Screen</option>
+          <option value="overlay">Overlay</option>
+          <option value="soft-light">Soft light</option>
+          <option value="darken">Darken</option>
+          <option value="lighten">Lighten</option>
+          <option value="difference">Difference</option>
+          <option value="luminosity">Luminosity</option>
+        </select>
+        <div class="row"><label>Opacity</label><span class="val" id="v_lyOpacity">100%</span></div>
+        <input type="range" id="lyOpacity" min="0" max="100" value="100">
+      </div>
+      <div class="btnrow" style="margin-top:8px">
+        <button id="lyAdd" title="Add an image as a new layer">Add image&hellip;</button>
+        <button id="lyDup" title="Duplicate active layer">Duplicate</button>
+      </div>
+      <div class="btnrow">
+        <button id="lyUp" title="Move layer up">&uarr;</button>
+        <button id="lyDown" title="Move layer down">&darr;</button>
+        <button id="lyMerge" title="Merge active layer into the one below">Merge</button>
+        <button id="lyDel" class="warn" title="Delete active layer">Delete</button>
+      </div>
+      <div class="hint">Double-click a name to rename. Drag on canvas or use arrow keys to move.</div>
+    </section>
+
     <section>
       <h3>Presets</h3>
       <div id="presetGrid"></div>
@@ -274,6 +318,17 @@
     </section>
 
     <section>
+      <h3>Next image</h3>
+      <label style="display:flex; gap:6px; align-items:center; margin-bottom:6px">
+        <input type="checkbox" id="carryAdjust"> Carry adjustments &amp; effects
+      </label>
+      <label style="display:flex; gap:6px; align-items:center">
+        <input type="checkbox" id="carrySize"> Match canvas size (crop + scale)
+      </label>
+      <div class="hint">Applied automatically when the next image is opened. Settings persist between sessions.</div>
+    </section>
+
+    <section>
       <h3>Export</h3>
       <div class="resizegrid" style="margin-bottom:8px">
         <select id="exFormat" style="flex:1">
@@ -299,86 +354,136 @@
 const $ = id => document.getElementById(id);
 const els = {
   viewport:$("viewport"), stage:$("stage"), dz:$("dropzone"),
-  preview:$("preview"), overlay:$("cropOverlay"), wrap:$("canvasWrap"),
+  preview:$("preview"), overlay:$("cropOverlay"),
+  layerList:$("layerList"), lyBlend:$("lyBlend"), lyOpacity:$("lyOpacity"),
   file:$("fileInput"),
   undo:$("btnUndo"), redo:$("btnRedo"), reset:$("btnReset"),
   compare:$("btnCompare"), exportBtn:$("btnExport"),
   stName:$("stName"), stDims:$("stDims"), stZoom:$("stZoom"),
   rzW:$("rzW"), rzH:$("rzH"), rzLock:$("rzLock"),
   cropTools:$("cropTools"), cropBtn:$("btnCrop"),
+  carryAdjust:$("carryAdjust"), carrySize:$("carrySize"),
   exFormat:$("exFormat"), exQuality:$("exQuality"), estLine:$("estLine"),
   toast:$("toast"),
 };
 
 const S = {
-  src:null,               // working full-res canvas
+  layers:[],              // [{name, canvas, x, y, opacity, blend, visible}] index 0 = bottom
+  active:0,
+  canvasW:0, canvasH:0,
+  prevScale:1,            // preview buffer px per source px
   fileName:"", fileSize:0,
   history:[], hIdx:-1,
   adjust:{brightness:100, contrast:100, saturate:100, temperature:0, tint:0, hue:0, blur:0, grayscale:0, sepia:0, invert:0},
   fx:{sharpen:0, vignette:0, grain:0, pixelate:0},
-  zoom:"fit",             // "fit" or number multiplier
+  zoom:"fit",
   cropMode:false, cropRect:null, cropAspect:null,
   comparing:false,
 };
 const DEF_ADJUST = {...S.adjust}, DEF_FX = {...S.fx};
-const PREVIEW_CAP = 1600;   // max long edge of preview buffer
-const HIST_MAX = 25;
+const PREVIEW_CAP = 1600;
+const HIST_MAX = 15;
 const WEBP_OK = document.createElement("canvas").toDataURL("image/webp").indexOf("data:image/webp") === 0;
+let pickMode = "doc";     // "doc" = replace document, "layer" = add as layer
+let compDirty = true, compCache = null;
 
 /* ---------- helpers ---------- */
 const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lsGet = k => { try { return localStorage.getItem(k); } catch(e){ return null; } };
+const lsSet = (k,v) => { try { localStorage.setItem(k,v); } catch(e){} };
 function cloneCanvas(c){
   const n = document.createElement("canvas");
   n.width = c.width; n.height = c.height;
   n.getContext("2d").drawImage(c, 0, 0);
   return n;
 }
+function baseName(s){ return (s||"").replace(/\.[^.]+$/, "") || "Layer"; }
 function toast(msg){
   els.toast.textContent = msg;
   els.toast.classList.add("show");
   clearTimeout(toast._t);
   toast._t = setTimeout(()=>els.toast.classList.remove("show"), 2400);
 }
+function getComp(){
+  if (compDirty || !compCache){ compCache = composite(); compDirty = false; }
+  return compCache;
+}
+function composite(){
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, S.canvasW); c.height = Math.max(1, S.canvasH);
+  const ctx = c.getContext("2d");
+  for (const L of S.layers){
+    if (!L.visible) continue;
+    ctx.globalAlpha = L.opacity / 100;
+    ctx.globalCompositeOperation = L.blend === "normal" ? "source-over" : L.blend;
+    ctx.drawImage(L.canvas, L.x, L.y);
+  }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  return c;
+}
 
 /* ---------- history ---------- */
-function stateSnapshot(){ return {src:cloneCanvas(S.src), adjust:{...S.adjust}, fx:{...S.fx}}; }
+function layerCopies(){
+  return S.layers.map(L => ({name:L.name, canvas:cloneCanvas(L.canvas), x:L.x, y:L.y,
+    opacity:L.opacity, blend:L.blend, visible:L.visible}));
+}
+function layerMeta(){
+  return JSON.stringify(S.layers.map(L =>
+    [L.name,L.x,L.y,L.opacity,L.blend,L.visible,L.canvas.width,L.canvas.height])) + S.canvasW + "x" + S.canvasH;
+}
 function pushHistory(){
   S.history.length = S.hIdx + 1;
-  S.history.push(stateSnapshot());
+  S.history.push({layers:layerCopies(), meta:layerMeta(), canvasW:S.canvasW, canvasH:S.canvasH,
+    active:S.active, adjust:{...S.adjust}, fx:{...S.fx}});
   if (S.history.length > HIST_MAX) S.history.shift();
   S.hIdx = S.history.length - 1;
   updateHistUI();
 }
 function restore(i){
   const h = S.history[i];
-  S.src = cloneCanvas(h.src);
+  S.layers = h.layers.map(L => ({...L, canvas:cloneCanvas(L.canvas)}));
+  S.canvasW = h.canvasW; S.canvasH = h.canvasH;
+  S.active = Math.min(h.active, S.layers.length - 1);
   S.adjust = {...h.adjust}; S.fx = {...h.fx};
   S.hIdx = i; S.cropMode = false; S.cropRect = null; S.zoom = "fit";
-  syncSliderUI(); syncResizeInputs(); syncCropUI(); markPreset();
-  updateHistUI(); renderPreview();
+  compDirty = true;
+  syncSliderUI(); syncResizeInputs(); syncCropUI(); syncLayerControls(); markPreset();
+  updateHistUI(); renderLayerList(); renderPreview();
+  els.stDims.textContent = S.canvasW + "\u00d7" + S.canvasH;
 }
 function updateHistUI(){
   els.undo.disabled = S.hIdx <= 0;
   els.redo.disabled = S.hIdx >= S.history.length - 1;
   els.reset.disabled = S.hIdx === 0;
-  els.exportBtn.disabled = !S.src;
-  els.compare.disabled = !S.src;
+  const noDoc = !S.layers.length;
+  els.exportBtn.disabled = noDoc;
+  els.compare.disabled = noDoc;
 }
 function currentEqualsTop(){
   if (S.hIdx < 0) return false;
   const t = S.history[S.hIdx];
-  return S.src.width === t.src.width && S.src.height === t.src.height &&
+  return S.layers.length === t.layers.length && layerMeta() === t.meta &&
     JSON.stringify(S.adjust) === JSON.stringify(t.adjust) &&
     JSON.stringify(S.fx) === JSON.stringify(t.fx);
 }
 function commitIfChanged(){
-  if (S.src && !currentEqualsTop()) pushHistory();
+  if (S.layers.length && !currentEqualsTop()) pushHistory();
+}
+function afterEdit(){
+  compDirty = true;
+  if (S.active >= S.layers.length) S.active = S.layers.length - 1;
+  pushHistory();
+  renderLayerList(); syncLayerControls();
+  renderPreview();
+  syncResizeInputs();
+  els.stDims.textContent = S.canvasW + "\u00d7" + S.canvasH;
+  updateEstimate();
+  lsSet("ww_last_size", S.canvasW + "x" + S.canvasH);
 }
 
 /* ---------- pipeline: filter string & pixel effects ---------- */
 const UNIT = {brightness:"%", contrast:"%", saturate:"%", hue:"\u00b0", blur:" px",
   grayscale:"%", sepia:"%", invert:"%", temperature:"", tint:"", sharpen:"", vignette:"", grain:"", pixelate:" px"};
-
 function filterString(scale = 1){
   const a = S.adjust;
   const blurPx = (a.blur * scale).toFixed(2);
@@ -472,15 +577,17 @@ function requestRender(){
   requestAnimationFrame(()=>{ renderQueued = false; renderPreview(); });
 }
 function renderPreview(bypass = false){
-  if (!S.src) return;
-  const scale = Math.min(1, PREVIEW_CAP / Math.max(S.src.width, S.src.height));
-  const w = Math.max(1, Math.round(S.src.width * scale));
-  const h = Math.max(1, Math.round(S.src.height * scale));
+  if (!S.layers.length) return;
+  const comp = getComp();
+  const scale = Math.min(1, PREVIEW_CAP / Math.max(comp.width, comp.height));
+  S.prevScale = scale;
+  const w = Math.max(1, Math.round(comp.width * scale));
+  const h = Math.max(1, Math.round(comp.height * scale));
   els.preview.width = w; els.preview.height = h;
   const ctx = els.preview.getContext("2d");
   ctx.imageSmoothingQuality = "high";
   ctx.filter = bypass ? "none" : filterString(scale);
-  ctx.drawImage(S.src, 0, 0, w, h);
+  ctx.drawImage(comp, 0, 0, w, h);
   ctx.filter = "none";
   if (!bypass) applyFX(ctx, w, h, scale);
   syncOverlaySize();
@@ -489,7 +596,7 @@ function renderPreview(bypass = false){
 
 /* ---------- view / zoom ---------- */
 function fitView(){
-  if (!S.src) return;
+  if (!S.layers.length || !els.preview.width) return;
   const availW = els.viewport.clientWidth - 64;
   const availH = els.viewport.clientHeight - 96;
   let z;
@@ -514,36 +621,84 @@ function syncOverlaySize(){
 window.addEventListener("resize", fitView);
 
 /* ---------- open / load ---------- */
-function openFile(file){
+function openFile(file, asLayer){
   if (!file || !file.type.startsWith("image/")){ toast("Not an image file"); return; }
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
     URL.revokeObjectURL(url);
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    c.getContext("2d").drawImage(img, 0, 0);
-    S.src = c;
-    S.fileName = file.name.replace(/\.[^.]+$/, "");
-    S.fileSize = file.size;
-    S.adjust = {...DEF_ADJUST}; S.fx = {...DEF_FX};
-    S.history = []; S.hIdx = -1;
-    S.zoom = "fit"; S.cropMode = false; S.cropRect = null;
-    pushHistory();
-    syncSliderUI(); syncResizeInputs(); syncCropUI(); markPreset();
-    els.dz.style.display = "none";
-    els.stage.hidden = false;
-    renderPreview();
-    els.stName.textContent = file.name;
-    els.stDims.textContent = `${img.naturalWidth}\u00d7${img.naturalHeight}`;
-    updateEstimate();
+    if (asLayer && S.layers.length){
+      addLayerFromImage(img, baseName(file.name));
+      toast("Added as layer");
+      return;
+    }
+    loadAsDocument(img, file);
   };
   img.onerror = () => { URL.revokeObjectURL(url); toast("Could not decode this image"); };
   img.src = url;
 }
-els.file.addEventListener("change", e => { openFile(e.target.files[0]); els.file.value = ""; });
-$("btnOpen").addEventListener("click", () => els.file.click());
-$("btnOpen2").addEventListener("click", () => els.file.click());
+function loadAsDocument(img, file){
+  const prevAdjust = {...S.adjust}, prevFx = {...S.fx};
+  const prevW = S.canvasW, prevH = S.canvasH;
+  const hadDoc = S.layers.length > 0;
+
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  c.getContext("2d").drawImage(img, 0, 0);
+  S.layers = [{name:baseName(file.name), canvas:c, x:0, y:0, opacity:100, blend:"normal", visible:true}];
+  S.active = 0;
+  S.canvasW = c.width; S.canvasH = c.height;
+  S.fileName = file.name; S.fileSize = file.size;
+  S.zoom = "fit"; S.cropMode = false; S.cropRect = null;
+  compDirty = true;
+
+  S.history = []; S.hIdx = -1;
+  pushHistory();                       // baseline: untouched image
+
+  let applied = false;
+  if (hadDoc && els.carryAdjust.checked){
+    S.adjust = {...prevAdjust}; S.fx = {...prevFx};
+    applied = true;
+  }
+  if (els.carrySize.checked){
+    let tw = 0, th = 0;
+    if (hadDoc && (prevW !== S.canvasW || prevH !== S.canvasH)){ tw = prevW; th = prevH; }
+    else {
+      const m = (lsGet("ww_last_size") || "").split("x");
+      tw = parseInt(m[0]) || 0; th = parseInt(m[1]) || 0;
+    }
+    if (tw > 0 && th > 0 && (tw !== S.canvasW || th !== S.canvasH)){
+      autoFitTo(tw, th);
+      applied = true;
+    }
+  }
+  if (applied) pushHistory();          // so the carried edits can be undone
+
+  syncSliderUI(); syncResizeInputs(); syncCropUI(); syncLayerControls(); markPreset();
+  updateHistUI(); renderLayerList();
+  els.dz.style.display = "none";
+  els.stage.hidden = false;
+  renderPreview();
+  els.stName.textContent = file.name;
+  els.stDims.textContent = S.canvasW + "\u00d7" + S.canvasH;
+  lsSet("ww_last_size", S.canvasW + "x" + S.canvasH);
+  updateEstimate();
+  if (applied) toast("Applied previous edits to new image");
+}
+function autoFitTo(tw, th){
+  const ar = tw / th, W = S.canvasW, H = S.canvasH;
+  let cw = W, ch = W / ar;
+  if (ch > H){ ch = H; cw = H * ar; }
+  opCrop(Math.round((W - cw) / 2), Math.round((H - ch) / 2), Math.round(cw), Math.round(ch));
+  opResize(tw, th);
+}
+els.file.addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (f) openFile(f, pickMode === "layer");
+  els.file.value = "";
+});
+$("btnOpen").addEventListener("click", () => { pickMode = "doc"; els.file.click(); });
+$("btnOpen2").addEventListener("click", () => { pickMode = "doc"; els.file.click(); });
 
 ["dragover","dragenter"].forEach(ev => document.body.addEventListener(ev, e => {
   e.preventDefault(); els.dz.classList.add("drag");
@@ -553,7 +708,7 @@ $("btnOpen2").addEventListener("click", () => els.file.click());
 }));
 document.body.addEventListener("drop", e => {
   const f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) openFile(f);
+  if (f) openFile(f, S.layers.length > 0);   // with a document open, a drop adds a layer
 });
 
 /* ---------- sliders ---------- */
@@ -603,7 +758,7 @@ $("rstFx").addEventListener("click", () => {
   S.fx = {...DEF_FX}; syncSliderUI(); markPreset(); requestRender(); commitIfChanged(); updateEstimate();
 });
 $("btnReset").addEventListener("click", () => {
-  if (!S.src || S.hIdx <= 0) return;
+  if (!S.layers.length || S.hIdx <= 0) return;
   restore(0);
   toast("All edits reverted");
 });
@@ -650,37 +805,233 @@ function markPreset(){
 })();
 markPreset();
 
-/* ---------- transform ---------- */
-function bake(newCanvas){
-  S.src = newCanvas;
-  S.zoom = "fit";
-  pushHistory();
-  renderPreview();
-  syncResizeInputs();
-  updateEstimate();
+/* ---------- layers ---------- */
+const EYE_ON  = '<svg viewBox="0 0 16 16"><path d="M1.5 8s2.6-4.2 6.5-4.2S14.5 8 14.5 8 11.9 12.2 8 12.2 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 16 16"><path d="M1.5 8s2.6-4.2 6.5-4.2S14.5 8 14.5 8 11.9 12.2 8 12.2 1.5 8 1.5 8z"/><path d="M2.5 13.5 13.5 2.5"/></svg>';
+function renderLayerList(){
+  const list = els.layerList;
+  list.innerHTML = "";
+  for (let i = S.layers.length - 1; i >= 0; i--){
+    const L = S.layers[i];
+    const row = document.createElement("div");
+    row.className = "lrow" + (i === S.active ? " sel" : "");
+    const eye = document.createElement("button");
+    eye.className = "eye" + (L.visible ? "" : " off");
+    eye.title = L.visible ? "Hide layer" : "Show layer";
+    eye.innerHTML = L.visible ? EYE_ON : EYE_OFF;
+    eye.addEventListener("click", e => {
+      e.stopPropagation();
+      L.visible = !L.visible;
+      compDirty = true;
+      renderLayerList(); requestRender(); commitIfChanged(); updateEstimate();
+    });
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = L.name;
+    nm.title = "Double-click to rename";
+    nm.addEventListener("dblclick", e => {
+      e.stopPropagation();
+      startRename(i, nm);
+    });
+    row.appendChild(eye); row.appendChild(nm);
+    row.addEventListener("click", () => {
+      if (S.active !== i){ S.active = i; renderLayerList(); syncLayerControls(); }
+    });
+    list.appendChild(row);
+  }
 }
-function rotateCanvas(src, dir){ // dir 1 = clockwise
+function startRename(i, span){
+  const L = S.layers[i];
+  const inp = document.createElement("input");
+  inp.className = "rn";
+  inp.value = L.name;
+  span.replaceWith(inp);
+  inp.focus(); inp.select();
+  const done = ok => {
+    if (ok && inp.value.trim() && inp.value.trim() !== L.name){
+      L.name = inp.value.trim();
+      commitIfChanged();
+    }
+    renderLayerList();
+  };
+  inp.addEventListener("blur", () => done(true));
+  inp.addEventListener("keydown", e => {
+    if (e.key === "Enter"){ e.preventDefault(); inp.blur(); }
+    if (e.key === "Escape"){ inp.value = L.name; inp.blur(); }
+    e.stopPropagation();
+  });
+}
+function syncLayerControls(){
+  if (!S.layers.length) return;
+  const L = S.layers[S.active];
+  if (!L) return;
+  els.lyBlend.value = L.blend;
+  els.lyOpacity.value = L.opacity;
+  $("v_lyOpacity").textContent = L.opacity + "%";
+}
+els.lyBlend.addEventListener("change", () => {
+  const L = S.layers[S.active]; if (!L) return;
+  L.blend = els.lyBlend.value;
+  compDirty = true; requestRender(); commitIfChanged(); updateEstimate();
+});
+els.lyOpacity.addEventListener("input", () => {
+  const L = S.layers[S.active]; if (!L) return;
+  L.opacity = parseInt(els.lyOpacity.value);
+  $("v_lyOpacity").textContent = L.opacity + "%";
+  compDirty = true; requestRender(); updateEstimate();
+});
+els.lyOpacity.addEventListener("change", commitIfChanged);
+function addLayerFromImage(img, name){
+  let w = img.naturalWidth, h = img.naturalHeight;
+  const k = Math.min(1, S.canvasW / w, S.canvasH / h);
+  w = Math.max(1, Math.round(w * k)); h = Math.max(1, Math.round(h * k));
   const c = document.createElement("canvas");
-  c.width = src.height; c.height = src.width;
+  c.width = w; c.height = h;
   const ctx = c.getContext("2d");
-  ctx.translate(c.width/2, c.height/2);
-  ctx.rotate(dir * Math.PI/2);
-  ctx.drawImage(src, -src.width/2, -src.height/2);
-  return c;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  const n = S.layers.filter(L => /^Layer \d+$/.test(L.name)).length + 1;
+  S.layers.push({name:name.match(/^Layer \d+$/) ? "Layer " + n : name,
+    canvas:c, x:Math.round((S.canvasW - w)/2), y:Math.round((S.canvasH - h)/2),
+    opacity:100, blend:"normal", visible:true});
+  S.active = S.layers.length - 1;
+  afterEdit();
 }
-function flipCanvas(src, horiz){
+$("lyAdd").addEventListener("click", () => { pickMode = "layer"; els.file.click(); });
+$("lyDup").addEventListener("click", () => {
+  const L = S.layers[S.active]; if (!L) return;
+  const copy = {...L, name:L.name + " copy", canvas:cloneCanvas(L.canvas), x:L.x + 12, y:L.y + 12};
+  S.layers.splice(S.active + 1, 0, copy);
+  S.active = S.active + 1;
+  afterEdit();
+});
+$("lyDel").addEventListener("click", () => removeLayer(S.active));
+function removeLayer(i){
+  if (S.layers.length <= 1){ toast("At least one layer is required"); return; }
+  S.layers.splice(i, 1);
+  S.active = clamp(S.active, 0, S.layers.length - 1);
+  afterEdit();
+}
+$("lyUp").addEventListener("click", () => moveLayer(1));
+$("lyDown").addEventListener("click", () => moveLayer(-1));
+function moveLayer(dir){
+  const i = S.active, j = i + dir;
+  if (j < 0 || j >= S.layers.length) return;
+  [S.layers[i], S.layers[j]] = [S.layers[j], S.layers[i]];
+  S.active = j;
+  afterEdit();
+}
+$("lyMerge").addEventListener("click", () => {
+  const i = S.active;
+  if (i <= 0){ toast("No layer below to merge into"); return; }
+  const A = S.layers[i], B = S.layers[i - 1];
+  const x = Math.min(A.x, B.x), y = Math.min(A.y, B.y);
+  const x2 = Math.max(A.x + A.canvas.width, B.x + B.canvas.width);
+  const y2 = Math.max(A.y + A.canvas.height, B.y + B.canvas.height);
   const c = document.createElement("canvas");
-  c.width = src.width; c.height = src.height;
+  c.width = x2 - x; c.height = y2 - y;
   const ctx = c.getContext("2d");
-  ctx.translate(horiz ? src.width : 0, horiz ? 0 : src.height);
-  ctx.scale(horiz ? -1 : 1, horiz ? 1 : -1);
-  ctx.drawImage(src, 0, 0);
-  return c;
+  ctx.globalAlpha = B.opacity / 100;
+  ctx.globalCompositeOperation = B.blend === "normal" ? "source-over" : B.blend;
+  ctx.drawImage(B.canvas, B.x - x, B.y - y);
+  ctx.globalAlpha = A.opacity / 100;
+  ctx.globalCompositeOperation = A.blend === "normal" ? "source-over" : A.blend;
+  ctx.drawImage(A.canvas, A.x - x, A.y - y);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  S.layers[i - 1] = {name:B.name, canvas:c, x, y, opacity:100, blend:"normal", visible:true};
+  S.layers.splice(i, 1);
+  S.active = i - 1;
+  afterEdit();
+});
+
+/* drag active layer on canvas */
+let dragL = null;
+els.preview.addEventListener("pointerdown", e => {
+  if (S.cropMode || !S.layers.length) return;
+  els.preview.setPointerCapture(e.pointerId);
+  const L = S.layers[S.active];
+  dragL = {cx:e.clientX, cy:e.clientY, lx:L.x, ly:L.y};
+});
+els.preview.addEventListener("pointermove", e => {
+  if (!dragL) return;
+  const z = parseFloat(els.preview.style.width) / els.preview.width;   // css px per preview px
+  const k = 1 / (z * S.prevScale || 1);                                // canvas px per css px
+  const L = S.layers[S.active];
+  L.x = Math.round(dragL.lx + (e.clientX - dragL.cx) * k);
+  L.y = Math.round(dragL.ly + (e.clientY - dragL.cy) * k);
+  compDirty = true;
+  requestRender();
+});
+els.preview.addEventListener("pointerup", () => {
+  if (dragL){ dragL = null; commitIfChanged(); updateEstimate(); }
+});
+els.preview.addEventListener("pointercancel", () => { dragL = null; });
+
+/* ---------- transform (applies to every layer) ---------- */
+function opRotate(dir){ // dir 1 = clockwise
+  const W = S.canvasW, H = S.canvasH;
+  for (const L of S.layers){
+    const c = document.createElement("canvas");
+    c.width = L.canvas.height; c.height = L.canvas.width;
+    const ctx = c.getContext("2d");
+    ctx.translate(c.width/2, c.height/2);
+    ctx.rotate(dir * Math.PI/2);
+    ctx.drawImage(L.canvas, -L.canvas.width/2, -L.canvas.height/2);
+    const nx = dir === 1 ? H - L.y - L.canvas.height : L.y;
+    const ny = dir === 1 ? L.x : W - L.x - L.canvas.width;
+    L.canvas = c; L.x = nx; L.y = ny;
+  }
+  S.canvasW = H; S.canvasH = W;
 }
-$("rotR").addEventListener("click", () => S.src && bake(rotateCanvas(S.src, 1)));
-$("rotL").addEventListener("click", () => S.src && bake(rotateCanvas(S.src, -1)));
-$("flipH").addEventListener("click", () => S.src && bake(flipCanvas(S.src, true)));
-$("flipV").addEventListener("click", () => S.src && bake(flipCanvas(S.src, false)));
+function opFlip(horiz){
+  const W = S.canvasW, H = S.canvasH;
+  for (const L of S.layers){
+    const c = document.createElement("canvas");
+    c.width = L.canvas.width; c.height = L.canvas.height;
+    const ctx = c.getContext("2d");
+    ctx.translate(horiz ? L.canvas.width : 0, horiz ? 0 : L.canvas.height);
+    ctx.scale(horiz ? -1 : 1, horiz ? 1 : -1);
+    ctx.drawImage(L.canvas, 0, 0);
+    if (horiz) L.x = W - L.x - L.canvas.width;
+    else L.y = H - L.y - L.canvas.height;
+    L.canvas = c;
+  }
+}
+function opCrop(cx, cy, cw, ch){
+  for (let i = S.layers.length - 1; i >= 0; i--){
+    const L = S.layers[i];
+    const x1 = Math.max(cx, L.x), y1 = Math.max(cy, L.y);
+    const x2 = Math.min(cx + cw, L.x + L.canvas.width);
+    const y2 = Math.min(cy + ch, L.y + L.canvas.height);
+    if (x2 <= x1 || y2 <= y1){ S.layers.splice(i, 1); continue; }
+    const c = document.createElement("canvas");
+    c.width = x2 - x1; c.height = y2 - y1;
+    c.getContext("2d").drawImage(L.canvas, x1 - L.x, y1 - L.y, x2 - x1, y2 - y1, 0, 0, x2 - x1, y2 - y1);
+    L.canvas = c; L.x = x1 - cx; L.y = y1 - cy;
+  }
+  S.canvasW = cw; S.canvasH = ch;
+  S.active = clamp(S.active, 0, S.layers.length - 1);
+}
+function opResize(w, h){
+  const sx = w / S.canvasW, sy = h / S.canvasH;
+  for (const L of S.layers){
+    const nw = Math.max(1, Math.round(L.canvas.width * sx));
+    const nh = Math.max(1, Math.round(L.canvas.height * sy));
+    const c = document.createElement("canvas");
+    c.width = nw; c.height = nh;
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(L.canvas, 0, 0, nw, nh);
+    L.canvas = c;
+    L.x = Math.round(L.x * sx); L.y = Math.round(L.y * sy);
+  }
+  S.canvasW = w; S.canvasH = h;
+}
+$("rotR").addEventListener("click", () => { if (S.layers.length){ opRotate(1); afterEdit(); } });
+$("rotL").addEventListener("click", () => { if (S.layers.length){ opRotate(-1); afterEdit(); } });
+$("flipH").addEventListener("click", () => { if (S.layers.length){ opFlip(true); afterEdit(); } });
+$("flipV").addEventListener("click", () => { if (S.layers.length){ opFlip(false); afterEdit(); } });
 
 /* ---------- crop ---------- */
 function syncCropUI(){
@@ -689,7 +1040,7 @@ function syncCropUI(){
   drawCropOverlay();
 }
 $("btnCrop").addEventListener("click", () => {
-  if (!S.src) return;
+  if (!S.layers.length) return;
   S.cropMode = !S.cropMode;
   S.cropRect = null;
   syncCropUI();
@@ -767,15 +1118,13 @@ function drawCropOverlay(){
   }
 }
 $("cropApply").addEventListener("click", () => {
-  if (!S.src || !S.cropRect) { toast("Drag a crop rectangle first"); return; }
-  const sx = S.src.width / els.overlay.width, sy = S.src.height / els.overlay.height;
-  const cx = Math.round(S.cropRect.x * sx), cy = Math.round(S.cropRect.y * sy);
-  const cw = Math.max(1, Math.round(S.cropRect.w * sx)), ch = Math.max(1, Math.round(S.cropRect.h * sy));
-  const c = document.createElement("canvas");
-  c.width = cw; c.height = ch;
-  c.getContext("2d").drawImage(S.src, cx, cy, cw, ch, 0, 0, cw, ch);
+  if (!S.layers.length || !S.cropRect) { toast("Drag a crop rectangle first"); return; }
+  const k = S.canvasW / els.overlay.width;   // uniform: overlay aspect matches canvas
+  const cx = Math.round(S.cropRect.x * k), cy = Math.round(S.cropRect.y * k);
+  const cw = Math.max(1, Math.round(S.cropRect.w * k)), ch = Math.max(1, Math.round(S.cropRect.h * k));
   S.cropMode = false; S.cropRect = null;
-  bake(c);
+  opCrop(cx, cy, cw, ch);
+  afterEdit();
   toast(`Cropped to ${cw}\u00d7${ch}`);
 });
 $("cropCancel").addEventListener("click", () => {
@@ -785,15 +1134,14 @@ $("cropCancel").addEventListener("click", () => {
 
 /* ---------- resize ---------- */
 function syncResizeInputs(){
-  if (!S.src) return;
-  els.rzW.value = S.src.width;
-  els.rzH.value = S.src.height;
+  els.rzW.value = S.canvasW || "";
+  els.rzH.value = S.canvasH || "";
 }
 function onRzInput(changed){
-  if (!S.src) return;
+  if (!S.layers.length) return;
   const w = parseInt(els.rzW.value) || 1, h = parseInt(els.rzH.value) || 1;
   if (els.rzLock.checked && changed){
-    const ar = S.src.width / S.src.height;
+    const ar = S.canvasW / S.canvasH;
     if (changed === "w") els.rzH.value = Math.max(1, Math.round(w / ar));
     else els.rzW.value = Math.max(1, Math.round(h * ar));
   }
@@ -801,29 +1149,30 @@ function onRzInput(changed){
 els.rzW.addEventListener("input", () => onRzInput("w"));
 els.rzH.addEventListener("input", () => onRzInput("h"));
 document.querySelectorAll("[data-pct]").forEach(b => b.addEventListener("click", () => {
-  if (!S.src) return;
+  if (!S.layers.length) return;
   const p = parseInt(b.dataset.pct) / 100;
-  els.rzW.value = Math.max(1, Math.round(S.src.width * p));
-  els.rzH.value = Math.max(1, Math.round(S.src.height * p));
+  els.rzW.value = Math.max(1, Math.round(S.canvasW * p));
+  els.rzH.value = Math.max(1, Math.round(S.canvasH * p));
 }));
 $("rzApply").addEventListener("click", () => {
-  if (!S.src) return;
+  if (!S.layers.length) return;
   const w = clamp(parseInt(els.rzW.value) || 0, 1, 10000);
   const h = clamp(parseInt(els.rzH.value) || 0, 1, 10000);
-  if (w === S.src.width && h === S.src.height){ toast("Size unchanged"); return; }
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  const ctx = c.getContext("2d");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(S.src, 0, 0, w, h);
-  bake(c);
+  if (w === S.canvasW && h === S.canvasH){ toast("Size unchanged"); return; }
+  opResize(w, h);
+  afterEdit();
   toast(`Resized to ${w}\u00d7${h}`);
 });
 
+/* ---------- carry-over settings ---------- */
+els.carryAdjust.checked = lsGet("ww_sticky_adjust") === "1";
+els.carrySize.checked = lsGet("ww_sticky_size") === "1";
+els.carryAdjust.addEventListener("change", () => lsSet("ww_sticky_adjust", els.carryAdjust.checked ? "1" : "0"));
+els.carrySize.addEventListener("change", () => lsSet("ww_sticky_size", els.carrySize.checked ? "1" : "0"));
+
 /* ---------- compare ---------- */
 function setCompare(on){
-  if (!S.src || on === S.comparing) return;
+  if (!S.layers.length || on === S.comparing) return;
   S.comparing = on;
   renderPreview(on);
 }
@@ -847,37 +1196,38 @@ $("zOut").addEventListener("click", () => zoomStep(0.8));
 $("zFit").addEventListener("click", () => { S.zoom = "fit"; fitView(); });
 $("z100").addEventListener("click", () => { S.zoom = 1; fitView(); });
 els.viewport.addEventListener("dblclick", e => {
-  if (!S.src) return;
+  if (!S.layers.length) return;
   S.zoom = S.zoom === "fit" ? 1 : "fit";
   fitView();
 });
 
 /* ---------- export ---------- */
 function buildOutput(){
+  const comp = getComp();
   const c = document.createElement("canvas");
-  c.width = S.src.width; c.height = S.src.height;
+  c.width = comp.width; c.height = comp.height;
   const ctx = c.getContext("2d");
   ctx.imageSmoothingQuality = "high";
   if (!isNeutral()){
     ctx.filter = filterString(1);
-    ctx.drawImage(S.src, 0, 0);
+    ctx.drawImage(comp, 0, 0);
     ctx.filter = "none";
     applyFX(ctx, c.width, c.height, 1);
   } else {
-    ctx.drawImage(S.src, 0, 0);
+    ctx.drawImage(comp, 0, 0);
   }
   return c;
 }
 let estTimer = null;
 function updateEstimate(){
   clearTimeout(estTimer);
-  if (!S.src) return;
+  if (!S.layers.length) return;
   estTimer = setTimeout(async () => {
     const fmt = els.exFormat.value;
     const q = parseInt(els.exQuality.value) / 100;
     const blob = await new Promise(res => buildOutput().toBlob(res, "image/" + fmt, fmt === "png" ? undefined : q));
     if (!blob){ els.estLine.textContent = "Encoding not supported by this browser"; return; }
-    els.estLine.textContent = `${S.src.width}\u00d7${S.src.height} \u00b7 ${fmtSize(blob.size)}` +
+    els.estLine.textContent = `${S.canvasW}\u00d7${S.canvasH} \u00b7 ${fmtSize(blob.size)}` +
       (S.fileSize ? ` (source: ${fmtSize(S.fileSize)})` : "");
   }, 350);
 }
@@ -893,7 +1243,7 @@ els.exQuality.addEventListener("input", () => {
   updateEstimate();
 });
 $("exDownload").addEventListener("click", async () => {
-  if (!S.src) return;
+  if (!S.layers.length) return;
   const fmt = els.exFormat.value;
   const q = parseInt(els.exQuality.value) / 100;
   els.estLine.textContent = "Encoding\u2026";
@@ -928,11 +1278,33 @@ document.addEventListener("keydown", e => {
     $("exDownload").click();
   } else if (mod && e.key.toLowerCase() === "o"){
     e.preventDefault();
-    els.file.click();
+    pickMode = "doc"; els.file.click();
   } else if (e.key === "Escape" && S.cropMode){
     S.cropMode = false; S.cropRect = null; syncCropUI();
   }
 });
+/* layer keys (ignored while typing in a field) */
+document.addEventListener("keydown", e => {
+  const tag = document.activeElement ? document.activeElement.tagName : "";
+  if (/INPUT|SELECT|TEXTAREA/.test(tag)) return;
+  if (!S.layers.length) return;
+  const L = S.layers[S.active];
+  const step = e.shiftKey ? 10 : 1;
+  let moved = false;
+  if (e.key === "ArrowLeft"){ L.x -= step; moved = true; }
+  else if (e.key === "ArrowRight"){ L.x += step; moved = true; }
+  else if (e.key === "ArrowUp"){ L.y -= step; moved = true; }
+  else if (e.key === "ArrowDown"){ L.y += step; moved = true; }
+  else if (e.key === "Delete"){ e.preventDefault(); removeLayer(S.active); return; }
+  if (moved){
+    e.preventDefault();
+    compDirty = true;
+    requestRender();
+    clearTimeout(nudgeTimer);
+    nudgeTimer = setTimeout(commitIfChanged, 400);
+  }
+});
+let nudgeTimer = null;
 
 /* initial */
 if (!WEBP_OK){
@@ -941,6 +1313,4 @@ if (!WEBP_OK){
   els.exFormat.value = "png";
 }
 syncSliderUI();
-</script>
-</body>
-</html>
+renderLayerList();
